@@ -253,7 +253,7 @@ print "Current Log Activity Report\n\n";
 if ( $db2level > 10.1 ) { # DB2 view is avavilable
   if ( $debugLevel > 0 ) { print "Executing: $scriptDir/runSQL.pl -sp \"%%DATABASE%%=$database\" \<$SQLin | db2 -t +wp -x\n";}
 
-  my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$SQLin | db2 -t +wp -x | grep 'DataHere`;
+  my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$SQLin | db2 -t +wp -x | grep 'DataHere'`;
   my ( $t, $MEMBER, $CUR_COMMIT_DISK_LOG_READS, $CURRENT_ACTIVE_LOG, $APPLID_HOLDING_OLDEST_XACT0 ) = split (" ",$ans);
   print "mon_get_transaction_log information:\n\n";
   print "  Member                        : $MEMBER\n";
