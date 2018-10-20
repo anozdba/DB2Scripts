@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lactivity.pl
 #
-# $Id: lactivity.pl,v 1.4 2014/05/25 22:24:31 db2admin Exp db2admin $
+# $Id: lactivity.pl,v 1.6 2018/10/18 22:58:50 db2admin Exp db2admin $
 #
 # Description:
 # Script to show activity on the system
@@ -14,6 +14,13 @@
 #
 # ChangeLog:
 # $Log: lactivity.pl,v $
+# Revision 1.6  2018/10/18 22:58:50  db2admin
+# correct issue with script when not run from home directory
+#
+# Revision 1.5  2018/10/15 23:53:26  db2admin
+# 1. convert from commonFunction.pl to commonFunctions.pm
+# 2. add in some debug displays
+#
 # Revision 1.4  2014/05/25 22:24:31  db2admin
 # correct the allocation of windows include directory
 #
@@ -29,6 +36,56 @@
 #
 # --------------------------------------------------------------------"
 
+my $ID = '$Id: lactivity.pl,v 1.6 2018/10/18 22:58:50 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+my $currentRoutine = 'Main';
+my $debugLevel = 0;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    my $tmp = rindex($0,'/');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+
 sub usage {
   if ( $#_ > -1 ) {
     if ( trim("$_[0]") ne "" ) {
@@ -36,7 +93,12 @@ sub usage {
     }
   }
 
-  print "Usage: $0 -?hso -d <database> [-n <number> [-D <delay>]]  [-a <applid>] [-c]
+  print "Usage: $0 -?hso -d <database> [-n <number> [-D <delay>]]  [-a <applid>] [-c] [-v[v]]
+
+       Script to show activity on the system
+
+       Version $Version Last Changed on $Changed (UTC)
+
        -h or -?        : This help message
        -s              : Silent mode (dont produce the report)
        -d              : Database to list
@@ -47,44 +109,33 @@ sub usage {
        \n ";
 }
 
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  BEGIN {
-    $scriptDir = 'c:\udbdba\scripts';
-    $tmp = rindex($0,"\\");
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  BEGIN {
-    $scriptDir = "c:\udbdba\scripts";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
+sub printDebug {
 
-require "commonFunctions.pl";
+  # ------------------------------------------------------------------------------
+  # Routine to print out debug information
+  # ------------------------------------------------------------------------------
+
+  my $routine = shift;   # routine calling for debug print
+  my $level = shift;     # debug level at whic1G/timeDiffh to print
+  my $test = shift;      # message
+
+  my $timestamp = getCurrentTimestamp;
+  $routine = substr("$routine                    ",0,20);
+
+  if ( $debugLevel >= $level ) {    # print it if the debug level is correct
+    print "$timestamp - $routine - $test\n";
+  }
+}
 
 # Set default values for variables
 
-$silent = "No";
-$database = "";
-$SelProc = "ALL";
-$DisHead = "Yes";
-$iterations = 1;
-$delay = 1;
-$changeOnly = 0;
+my $silent = "No";
+my $database = "";
+my $SelProc = "ALL";
+my $DisHead = "Yes";
+my $iterations = 1;
+my $delay = 1;
+my $changeOnly = 0;
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
@@ -92,13 +143,7 @@ $changeOnly = 0;
 
 # Initialise vars for getOpt ....
 
-$getOpt_prm = 0;
-$getOpt_opt = ":?hscoD:n:d:a:";
-
-$getOpt_optName = "";
-$getOpt_optValue = "";
-
-while ( getOpt($getOpt_opt) ) {
+while ( getOpt(":?hscoD:n:d:a:v") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
@@ -117,6 +162,12 @@ while ( getOpt($getOpt_opt) ) {
      print "Applications on database $getOpt_optValue will be listed\n";
    }
    $database = $getOpt_optValue;
+ }
+ elsif (($getOpt_optName eq "v"))  {
+   $debugLevel++;
+   if ( $silent ne "Yes") {
+     print "Debug level set to $debugLevel\n";
+   }
  }
  elsif (($getOpt_optName eq "c"))  {
    if ( $silent ne "Yes") {
@@ -199,6 +250,8 @@ $zeroes = "00";
 $lines = 0;
 $CurrSection = "";
 
+printDebug($currentRoutine, 1, "Starting run");
+
 while ( $iterations > 0 ) {
   $iterations--;
 
@@ -212,12 +265,13 @@ while ( $iterations > 0 ) {
   $lines++;
 
   if (! open (LTSPIPE,"db2 get snapshot for all applications |"))  {
-          die "Can't run du! $!\n";
+          die "Can't run db2 get snapshot! $!\n";
       }
 
   while (<LTSPIPE>) {
-      # print "$CurrSection   : Processing $_\n";
+      chomp;
       # parse the db2 get snapshot for all applications response
+      printDebug($currentRoutine, 2, "$CurrSection - Processing: $_");
 
       if ( $_ =~ /SQL1024N/) {
         die "A database connection must be established before running this program\n";
@@ -228,23 +282,29 @@ while ( $iterations > 0 ) {
       @appsnapinfo = split(/=/,$linein);
 
       if ( trim($appsnapinfo[0]) eq "Application Snapshot") {
+        printDebug($currentRoutine, 1, "$CurrSection - Change of section");
         $CurrSection = "AppSnap";
       }
 
       if ( trim($appsnapinfo[0]) eq "Database Connection Information") {
+        printDebug($currentRoutine, 1, "$CurrSection - Change of section");
         $CurrSection = "DBConnection";
       }
 
       if ( trim($appsnapinfo[0]) eq "Application handle") {
+        printDebug($currentRoutine, 1, "$CurrSection - APPLID = $AppID");
         $AppID = trim($appsnapinfo[1]);
       }
       if ( trim($appsnapinfo[0]) eq "CONNECT Authorization ID") {
+        printDebug($currentRoutine, 1, "$CurrSection - AuthID = $AuthID");
         $AuthID = trim($appsnapinfo[1]);
       }
       if ( trim($appsnapinfo[0]) eq "Database name") {
+        printDebug($currentRoutine, 1, "$CurrSection - DBName = $DBName");
         $DBName = trim($appsnapinfo[1]);
       }
       if ( trim($appsnapinfo[0]) eq "Snapshot timestamp") {
+        printDebug($currentRoutine, 1, "$CurrSection - SnapTime = $SnapTime");
         $SnapTime = trim($appsnapinfo[1]);
       }
       if ( trim($appsnapinfo[0]) eq "Buffer pool data physical reads") {
@@ -310,9 +370,10 @@ while ( $iterations > 0 ) {
       }
       if ( trim($appsnapinfo[0]) eq "Workspace Information") {
         $CurrSection = "WorkspaceInformation";
+        printDebug($currentRoutine, 1, "$CurrSection - Change of section");
         
         if ( ($SelProc eq $ProcessID) || ($SelProc eq "ALL")  || ($SelProc eq $AppID) ) {
-          if ( ($database eq $DBName ) || ( $database eq "") ) {
+          if ( (uc($database) eq uc($DBName) ) || ( $database eq "") ) {
             ## output the CPU Time details .....
             if (! defined( $lastValues{$AppID} ) ) {
               if ( $changeOnly == 0 ) { 

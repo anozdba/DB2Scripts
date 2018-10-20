@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ldbcfg.pl
 #
-# $Id: ldbcfg.pl,v 1.14 2014/05/25 22:26:22 db2admin Exp db2admin $
+# $Id: ldbcfg.pl,v 1.16 2018/10/17 00:58:51 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a GET DB CFG command
@@ -14,6 +14,12 @@
 #
 # ChangeLog:
 # $Log: ldbcfg.pl,v $
+# Revision 1.16  2018/10/17 00:58:51  db2admin
+# convert from commonFunction.pl to commonFunctions.pm
+#
+# Revision 1.15  2018/10/15 22:48:03  db2admin
+# convert use of commonFunctions.pl to commonFunctions.pm
+#
 # Revision 1.14  2014/05/25 22:26:22  db2admin
 # correct the allocation of windows include directory
 #
@@ -60,10 +66,49 @@
 #
 # --------------------------------------------------------------------
 
-$ID = '$Id: ldbcfg.pl,v 1.14 2014/05/25 22:26:22 db2admin Exp db2admin $';
-@V = split(/ /,$ID);
-$Version=$V[2];
-$Changed="$V[3] $V[4]";
+my $ID = '$Id: ldbcfg.pl,v 1.16 2018/10/17 00:58:51 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -73,6 +118,8 @@ sub usage {
   }
 
   print STDERR "Usage: $0 -?hs [-D] -d <database> [-p <search parm>] [-V <search string>] [-o | ONLY]  [-g | GENDATA] [-f <filename> [-x|X]] [-v[v]] [-S]
+
+       Script to list out selected db configuration parameters
 
        Version $Version Last Changed on $Changed (UTC)
 
@@ -92,37 +139,10 @@ sub usage {
 
        NOTE: -x only has an effect if -g is specified
              -X only has an effect if -f and -g are specified
+ 
+             This is really just a formatted/filtered 'db2 get db cfg for <database>' (with an optional show detail)
      \n";
 }
-
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  BEGIN {
-    $scriptDir = 'c:\udbdba\scripts';
-    $tmp = rindex($0,"\\");
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  BEGIN {
-    $scriptDir = "/udbdba/scripts";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-
-require "commonFunctions.pl";
 
 # Set default values for variables
 

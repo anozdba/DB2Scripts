@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lspace.pl
 #
-# $Id: lspace.pl,v 1.2 2009/07/20 02:38:17 db2admin Exp db2admin $
+# $Id: lspace.pl,v 1.4 2018/10/18 22:58:52 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST TABLESPACE CONTAINERS FOR <db> command
@@ -14,6 +14,12 @@
 #
 # ChangeLog:
 # $Log: lspace.pl,v $
+# Revision 1.4  2018/10/18 22:58:52  db2admin
+# correct issue with script when not run from home directory
+#
+# Revision 1.3  2018/10/17 03:42:45  db2admin
+# convert from commonFunction.pl to commonFunctions.pm
+#
 # Revision 1.2  2009/07/20 02:38:17  db2admin
 # Add in Windows support
 #
@@ -23,6 +29,54 @@
 #
 # --------------------------------------------------------------------
 
+my $ID = '$Id: lspace.pl,v 1.4 2018/10/18 22:58:52 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    my $tmp = rindex($0,'/');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+
 sub usage {
   if ( $#_ > -1 ) {
     if ( trim("$_[0]") ne "" ) {
@@ -31,6 +85,12 @@ sub usage {
   }
 
   print "Usage: $0 -?hDOCSs [DATA] [DATAONLY] [SETTSCONT] -d <database> [-t <tablespace>] [-p <container prefix>] [-q[q etc]]
+
+       Script to format the output of a LIST TABLESPACE CONTAINERS FOR <db> command and shopw space available on the associated
+       drives/devices
+
+       Version $Version Last Changed on $Changed (UTC)
+
        -h or -?        : This help message
        -D or DATA      : Produce data file
        -O or DATAONLY  : Do not produce the report
@@ -42,31 +102,6 @@ sub usage {
        -q              : sets the debug level -qq set it to 2 -qqq sets it to 3 etc
        -p              : When printing SET TS CONTAINER commands prefix the file names with this string\n";
 }
-
-
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  $levDelim = '\\';
-  use lib 'c:\udbdba\scripts';
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  $levDelim = '/';
-  BEGIN {
-    $scriptDir = "/";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-
-require "commonFunctions.pl";
 
 $GenSetTSCont = "No";
 $genData = "No";

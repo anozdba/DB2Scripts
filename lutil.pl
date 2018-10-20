@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lutil.pl
 #
-# $Id: lutil.pl,v 1.26 2016/11/03 00:14:30 db2admin Exp db2admin $
+# $Id: lutil.pl,v 1.40 2018/09/26 05:09:26 db2admin Exp db2admin $
 #
 # Description:
 # Script to reformat the output of the following commands:
@@ -17,6 +17,52 @@
 #
 # ChangeLog:
 # $Log: lutil.pl,v $
+# Revision 1.40  2018/09/26 05:09:26  db2admin
+# add in parameter -x to allow a portion of the elapsed time to be excluded when calulating estimates
+#
+# Revision 1.39  2018/09/19 22:03:55  db2admin
+# correct bug in the processing of utility type
+#
+# Revision 1.38  2018/09/17 05:44:24  db2admin
+# dont leave space in the type column for loads
+#
+# Revision 1.37  2018/01/16 20:35:55  db2admin
+# adjust some of the reorg messages
+#
+# Revision 1.36  2018/01/15 22:35:05  db2admin
+# Minor alterations:
+# 1. Output data on reorgs
+# 2. display paused reorgs
+#
+# Revision 1.35  2017/12/27 22:03:59  db2admin
+# correct calculation of estimated time for phases
+#
+# Revision 1.34  2017/10/27 04:10:00  db2admin
+# correct div by zero error
+#
+# Revision 1.33  2017/07/03 04:47:17  db2admin
+# added in %complete calcualtion to output where applicable
+#
+# Revision 1.32  2017/07/03 00:50:24  db2admin
+# Corrected some processing of US dates
+# Corrected display of parameter -U
+# Ensured only deals in whole minutes
+#
+# Revision 1.31  2017/05/27 00:54:22  db2admin
+# allow a total work figure to be specified (useful for restores)
+#
+# Revision 1.30  2017/05/24 23:40:48  db2admin
+# show completed work even if total work isn't available
+#
+# Revision 1.29  2017/04/23 12:13:11  db2admin
+# make sure database name is in upper case
+#
+# Revision 1.28  2017/04/22 23:25:36  db2admin
+# add in option to output the utility ID information in a load format
+#
+# Revision 1.27  2017/04/10 03:02:40  db2admin
+# correct time difference and estimates
+#
 # Revision 1.26  2016/11/03 00:14:30  db2admin
 # 1. Add option to allow utility (non reorg) dates to have either US (mm/dd/yyyy) or EUR (dd/mm/yyyy) date formats
 # 2. Allow the use of environment variables to set the default date format for a server
@@ -89,7 +135,7 @@ my $currentSection = 'ID';
 my $inFile = '';
 my $inReorg = '';
 my $debugLevel = 0;
-my $datecalc_debugLevel = 0;
+$datecalc_debugLevel = 0;
 my %utlValues_ID = ();
 my %utlValues_Phase = ();
 my $nowTS;
@@ -101,13 +147,25 @@ my $printedReorgs = 0;
 # note that US format is defined as mm/dd/yyy
 my $utilDate_USFormat = 0;   # default format is EUR (dd/mm/yyyy)
 my $reorgDate_USFormat = 0;  # default format is EUR (dd/mm/yyyy)
+my $percent_completed;
+my $percentLit;
+my $maxCount;
+my $reorgTable;
+my $excludeMinutes = 0;
 
 my $reorgDate_warning = 0;
 my $utilDate_warning = 0;
+my $loadable = 0;
+my $total = 0;
+my $instance = $ENV{'DB2INSTANCE'};
+my $completed = 0;
+my $loadStartTime;
+my $reorgStartTime;
+my $totalWork = '';
 
 # -------------------------------------------------------------------
 
-my $ID = '$Id: lutil.pl,v 1.26 2016/11/03 00:14:30 db2admin Exp db2admin $';
+my $ID = '$Id: lutil.pl,v 1.40 2018/09/26 05:09:26 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -123,6 +181,35 @@ sub printDebug {
   print "$routine - $test\n";
 }
 
+sub outputReorgLoadValues {
+
+# ------------------------------------------------------------------------------
+# Routine to print out the utility information in load format
+# ------------------------------------------------------------------------------
+
+  my $utilID = trim($utlValues_ID{'ID'});
+  my $uc_database = uc($database);
+
+  print "LOAD,$nowTS,$machine,$instance,$uc_database,1,$reorgStartTime,\"$reorgTable\",\"Reorg\",$maxCount,$completed\n";
+
+} # end of outputReorgLoadValues
+
+sub outputLoadValues {
+
+# ------------------------------------------------------------------------------
+# Routine to print out the utility information in load format
+# ------------------------------------------------------------------------------
+
+  my $utilID = trim($utlValues_ID{'ID'});
+  my $uc_database = uc($database);
+
+  my $converted_type = $utlValues_ID{'Type'};
+  $converted_type =~ s/ /_/g ; 
+
+  print "LOAD,$nowTS,$machine,$instance,$uc_database,$utilID,$loadStartTime,\"$utlValues_ID{'Description'}\",\"$converted_type\",$total,$completed\n";
+
+}
+
 sub printUtilityValues {
 
 # ------------------------------------------------------------------------------
@@ -131,12 +218,14 @@ sub printUtilityValues {
 
   my $currentRoutine = 'printUtilityValues';
   my $workType = '';
-  my $total = 0;
-  my $completed = 0;
+  $total = 0;
+  $completed = 0;
+  $percentLit = "unknown %";
 
   $allUtilities++;
 
   if ( $database ne 'All' && uc($database) ne uc($utlValues_ID{'Database Name'}) ) { return; } # this database is not required
+
 
   $printedUtilities++;
   
@@ -155,21 +244,31 @@ sub printUtilityValues {
     else {
       ($day, $mon, $year, $hr, $min, $sec) = ($utlValues_ID{'Start Time'} =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
     }
+    $loadStartTime = "$year.$mon.$day $hr:$min:$sec";
+    if ( $debugLevel > 2 ) { printDebug( "call: $year-$mon-$day $hr:$min:$sec, $nowTS"); }
     if ( $debugLevel > 2 ) { printDebug( "startTime: $utlValues_ID{'Start Time'}, day:$day, month:$mon, year:$year, hour:$hr, minute:$min, seconds:$sec)", $currentRoutine); }
-    my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS);
+    my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS, 'M');
 
     if ( $minsElapsed > (1440 * 7 ) ) { $utilDate_warning = 1; } # utility has been running longer than 7 days - perhaps the date format is wrong
 
-    if (defined($utlValues_ID{'Completed Work'})) { ($completed) = ( $utlValues_ID{'Completed Work'} =~ /(\d*) /); }
+    if (defined($utlValues_ID{'Completed Work'})) { ($completed, $workType) = ( $utlValues_ID{'Completed Work'} =~ /(\d*) (.*)/); }
     
     if (defined($utlValues_ID{'Total Work'})) { 
       ($total,$workType) = ( $utlValues_ID{'Total Work'} =~ /(\d*) (.*)/); 
     }
+    elsif ( $totalWork ne '' ) {
+      $total = $totalWork;
+    } 
     
     if ( $debugLevel > 0 ) { printDebug( "Minutes Elapsed: $minsElapsed, Total work is defined as $total $workType", $currentRoutine); }
     
-    if ( $total == 0 ) { # target work so unable to estimate run time
-      print "  Status: Running $utlValues_ID{'Description'} $utlValues_ID{'Type'}\n";
+    if ( $total == 0 ) { # no target work so unable to estimate run time
+      if ( $completed > 0 ) {
+        print "  Status: Running $utlValues_ID{'Description'} $utlValues_ID{'Type'}. Completed $completed $workType.\n";
+      }
+      else {
+        print "  Status: Running $utlValues_ID{'Description'} $utlValues_ID{'Type'}\n";
+      }
       print "          No total work figure available so no run time estimates can be generated. Has been running for " . displayMinutes($minsElapsed) . "\n\n";
     }
     else { # total work is available
@@ -178,13 +277,16 @@ sub printUtilityValues {
         print "          No completed work figure available so no run time estimates can be generated. Has been running for " . displayMinutes($minsElapsed) . "\n\n";
       }
       else { # should be able to provide estimates
-        print "  Status: Running $utlValues_ID{'Description'} $utlValues_ID{'Type'}. $completed $workType out of $total have been processed in " . displayMinutes($minsElapsed) . "\n";
-        my $estMinutes = int(($total * $minsElapsed) / $completed);
-        my $stillToGo = int($estMinutes - $minsElapsed);
+        $percent_completed = int(($completed / $total) * 100);
+        $percentLit = "$percent_completed %";
+        print "  Status: Running $utlValues_ID{'Description'} $utlValues_ID{'Type'}. $completed $workType out of $total ($percentLit) have been processed in " . displayMinutes($minsElapsed) . "\n";
+        my $estMinutes = int(($total * ($minsElapsed - $excludeMinutes)) / $completed);
+        my $stillToGo = int($estMinutes - ($minsElapsed -  $excludeMinutes));
         my $finishTime = timeAdd( $nowTS, $stillToGo );
-        print "          Expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes) . " in total) at $finishTime\n\n"; 
+        print "          Expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes+$excludeMinutes) . " in total) at $finishTime\n\n"; 
       }
     }
+ 
   }
   else { # it must have been called from a new Phase
   
@@ -192,27 +294,36 @@ sub printUtilityValues {
     
     my ($day, $mon, $year, $hr, $min, $sec);
     if ( $utilDate_USFormat ) { # US format
-      ($day, $mon, $year, $hr, $min, $sec) = ( $utlValues_Phase{'Start Time'} =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/ );
+      ($mon, $day, $year, $hr, $min, $sec) = ( $utlValues_Phase{'Start Time'} =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/ );
     }
     else { 
       ($day, $mon, $year, $hr, $min, $sec) = ( $utlValues_Phase{'Start Time'} =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/ );
     }
+    $loadStartTime = "$year.$mon.$day $hr:$min:$sec";
     if ( $debugLevel > 2 ) { printDebug( "%% startTime: $utlValues_Phase{'Start Time'}, day:$day, month:$mon, year:$year, hour:$hr, minute:$min, seconds:$sec)", $currentRoutine); }
-    my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS);
+    my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS, 'M');
 
     if ( $minsElapsed > (1440 * 7 ) ) { $utilDate_warning = 1; } # utility has been running longer than 7 days - perhaps the date format is wrong
 
-    if (defined($utlValues_Phase{'Completed Work'})) { ($completed) = ( $utlValues_Phase{'Completed Work'} =~ /(\d*) /); }
+    if (defined($utlValues_Phase{'Completed Work'})) { ($completed, $workType) = ( $utlValues_Phase{'Completed Work'} =~ /(\d*) (.*)/); }
     
     if (defined($utlValues_Phase{'Total Work'})) { 
       ($total,$workType) = ( $utlValues_Phase{'Total Work'} =~ /(\d*) (.*)/); 
     }
+    elsif ( $totalWork ne '' ) {
+      $total = $totalWork;
+    } 
     
     if ( $debugLevel > 0 ) { printDebug( "%% Minutes Elapsed: $minsElapsed, Total work is defined as $total $workType", $currentRoutine); }
     
     print "          Phase $utlValues_Phase{'Phase Number'} has been running since $utlValues_Phase{'Start Time'} \n";
     if ( $total == 0 ) { # target work so unable to estimate run time
-      print "  Status: Running $utlValues_Phase{'Description'} phase.\n";
+      if ( $completed > 0 ) {
+        print "  Status: Running $utlValues_Phase{'Description'} phase. Completed $completed $workType.\n";
+      }
+      else {
+        print "  Status: Running $utlValues_Phase{'Description'} phase.\n";
+      }
       print "          No total work figure available so no run time estimates can be generated. Has been running for " . displayMinutes($minsElapsed) . "\n\n";
     }
     else { # total work is available
@@ -221,15 +332,19 @@ sub printUtilityValues {
         print "          No completed work figure available so no run time estimates can be generated. Has been running for " . displayMinutes($minsElapsed) . "\n\n";
       }
       else { # should be able to provide estimates
-        print "  Status: Running $utlValues_Phase{'Description'} phase. $completed $workType out of $total have been processed in " . displayMinutes($minsElapsed) . "\n";
-        my $estMinutes = ($total * $minsElapsed) / $completed;
-        my $stillToGo = int($estMinutes - $minsElapsed);
+        $percent_completed = int(($completed / $total) * 100);
+        $percentLit = "$percent_completed %";
+        print "  Status: Running $utlValues_Phase{'Description'} phase. $completed $workType out of $total ($percentLit) have been processed in " . displayMinutes($minsElapsed) . "\n";
+        my $estMinutes = int(($total * ($minsElapsed - $excludeMinutes)) / $completed);
+        my $stillToGo = int($estMinutes - ($minsElapsed - $excludeMinutes));
         my $finishTime = timeAdd( $nowTS, $stillToGo );
-        print "          Expected to complete in " . displayMinutes($stillToGo) . " mins (" . displayMinutes($estMinutes) . " in total) at $finishTime\n\n"; 
+        print "          Expected to complete in " . displayMinutes($stillToGo) . " mins (" . displayMinutes($estMinutes+$excludeMinutes) . " in total) at $finishTime\n\n"; 
       }
     }
   }
   
+  if ( $loadable ) { outputLoadValues(); }
+   
 } # end of printUtilityValues
 
 sub by_key {
@@ -243,7 +358,7 @@ sub usage {
     }
   }
 
-  print "Usage: $0 [-?hs] [-A] -d <database> [-i <ID Name>] [-f <file name>] [-v[v]] [-r <reorg file>] [-u|-e]
+  print "Usage: $0 [-?hs] [-A] -d <database> [-i <ID Name>] [-f <file name>] [-v[v]] [-r <reorg file>] [-x minutes] [-u|-e] [-L] [-t <total work>]
 
        Script to reformat obtained information about running utilities
 
@@ -258,9 +373,13 @@ sub usage {
                          Note only list utility statements can be fed in through this file
        -r              : file to reads reorg information from (defaults to dynamically retrieving it)
                          Note only db2pd reorg statements can be fed in through this file
+       -t              : total work to be used if no total work figure found
        -e              : reorg date format is in European format dd/mm/yyyy
        -u              : reorg date format is in US format mm/dd/yyyy [default]
        -U              : non-reorg utilities date format is in US format mm/dd/yyyy [default is in European date format]
+       -L              : also output in a loadable format
+       -x              : exclude this many minutes from the elapsed time when calculating estimates
+                         (primarily used to account for disk initialisation during restores)
        -v              : set debug level
 
        The date formats (utility and reorg) can be set permanently for a server by setting environment variables:
@@ -307,7 +426,7 @@ my $utilityID = 'All';
 
 # Initialise vars for getOpt ....
 
-while ( getOpt(":?hsvd:Ai:f:r:uUe") ) {
+while ( getOpt(":?hsLvx:d:Ai:f:r:uUet:") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
@@ -327,10 +446,22 @@ while ( getOpt(":?hsvd:Ai:f:r:uUe") ) {
      print "All reorgs (active and completed) will be displayed\n";
    }
  }
+ elsif (($getOpt_optName eq "L"))  {
+   $loadable = 1;
+   if ( $silent ne "Yes") {
+     print "Information will also be printed in a loadable format\n";
+   }
+ }
  elsif (($getOpt_optName eq "i"))  {
    $utilityID = $getOpt_optValue;
    if ( $silent ne "Yes") {
      print "Only utility ID $getOpt_optValue will be displayed\n";
+   }
+ }
+ elsif (($getOpt_optName eq "t"))  {
+   $totalWork = $getOpt_optValue;
+   if ( $silent ne "Yes") {
+     print "If needed a total work figure of $getOpt_optValue will be used\n";
    }
  }
  elsif (($getOpt_optName eq "f"))  {
@@ -348,13 +479,24 @@ while ( getOpt(":?hsvd:Ai:f:r:uUe") ) {
  elsif (($getOpt_optName eq "U"))  {
    $utilDate_USFormat = 1;
    if ( $silent ne "Yes") {
-     print "Utility (non reorg) date format is European format\n";
+     print "Utility (non reorg) date format is US format\n";
    }
  }
  elsif (($getOpt_optName eq "u"))  {
    $reorgDate_USFormat = 1;
    if ( $silent ne "Yes") {
      print "DB2PD Reorg date format is US format\n";
+   }
+ }
+ elsif (($getOpt_optName eq "x"))  {
+   $excludeMinutes = $getOpt_optValue * 1;
+   if ( $excludeMinutes != $getOpt_optValue ) { 
+     usage ("x Parameter value ($getOpt_optValue) must be numeric");
+   }
+   else {
+     if ( $silent ne "Yes") {
+       print "$getOpt_optValue minutes will be subtracted from the elapsed time when calculating estimated times\n";
+     }
    }
  }
  elsif (($getOpt_optName eq "r"))  {
@@ -492,7 +634,8 @@ if ( $database ne "All" ) { # a database has been specified ....
   my $PTID = '';
   my $type = '';
   my $firstLine = 1;
-  my $completed = 0;
+  $completed = 0;
+  $percentLit = 'Unknown %';
 
   while ( <UTILPIPE> ) { # process the input .......
 
@@ -530,6 +673,7 @@ if ( $database ne "All" ) { # a database has been specified ....
     if ( $lineIndicator eq 'TRS' ) { 
       $allReorgs++;
       @TRS = split;
+      $reorgTable = $TRS[1];
 
       if ( $debugLevel > 2) { for ( my $i = 0 ; $i<=$#TRS ; $i++ ) { print "$i: $TRS[$i]\n"; } }
       if ( $TRS[4] eq 'n/a' ) { # reorg not finished so no end date
@@ -546,7 +690,7 @@ if ( $database ne "All" ) { # a database has been specified ....
         
         # work out run time so far .....
 
-        my $sTime = $TRS[5] . ' ' . $TRS[6] ;
+        my $sTime = $TRS[2] . ' ' . $TRS[3] ;
         my ($day, $mon, $year, $hr, $min, $sec);
         if ( $reorgDate_USFormat ) {
           ($mon, $day, $year, $hr, $min, $sec) = ( $sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
@@ -554,8 +698,9 @@ if ( $database ne "All" ) { # a database has been specified ....
         else {
           ($day, $mon, $year, $hr, $min, $sec) = ( $sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
         }
-        if ( $debugLevel > 2 ) { printDebug( "startTime: " . $TRS[5] . ' ' . $TRS[6] . ", day:$day, month:$mon, year:$year, hour:$hr, minute:$min, seconds:$sec)", $currentRoutine); }
-        my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS);
+        $reorgStartTime = "$year.$mon.$day $hr:$min:$sec";
+        if ( $debugLevel > 2 ) { printDebug( "startTime: " . $TRS[2] . ' ' . $TRS[3] . ", day:$day, month:$mon, year:$year, hour:$hr, minute:$min, seconds:$sec)", $currentRoutine); }
+        my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS, 'M');
 
         if ( $minsElapsed > (1440 * 7 ) ) { $utilDate_warning = 1; } # utility has been running longer than 7 days - perhaps the date format is wrong
 
@@ -566,13 +711,127 @@ if ( $database ne "All" ) { # a database has been specified ....
           print "          No completed work figure available so no run time estimates can be generated. Has been running for " . displayMinutes($minsElapsed) . "\n\n";
         }
         else { # should be able to provide estimates
-          print "  Status: Running Phase $TRS[8]. $TRS[9] out of $TRS[10] have been processed in " . displayMinutes($minsElapsed). " (Tablespace ID: $TSID, Table ID: $TBID, Partition: $PTID)\n";
-          my $estMinutes = int(($TRS[10] * $minsElapsed) / $TRS[9]);
+          my $phs_sTime;
+          my $elapsed;
+          my ($phs_day, $phs_mon, $phs_year, $phs_hr, $phs_min, $phs_sec);
+          if ( $TRS[5] eq 'n/a' ) { # no phases
+            $completed = $TRS[8];
+            $maxCount = $TRS[9];
+            $elapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", $nowTS, 'M');
+          }
+          else {
+            $completed = $TRS[9];
+            $maxCount = $TRS[10];
+
+            $phs_sTime = $TRS[5] . ' ' . $TRS[6] ;
+            if ( $reorgDate_USFormat ) {
+              ($phs_mon, $phs_day, $phs_year, $phs_hr, $phs_min, $phs_sec) = ( $phs_sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+            }
+            else {
+              ($phs_day, $phs_mon, $phs_year, $phs_hr, $phs_min, $phs_sec) = ( $phs_sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+            }
+            if ( $debugLevel > 2 ) { printDebug( "startTime: " . $TRS[5] . ' ' . $TRS[6] . ", day:$phs_day, month:$phs_mon, year:$phs_year, hour:$phs_hr, minute:$phs_min, seconds:$phs_sec)", $currentRoutine); }
+            $elapsed = timeDiff ("$phs_year-$phs_mon-$phs_day $phs_hr:$phs_min:$phs_sec", $nowTS, 'M');
+          }
+
+          $percent_completed = int(($completed / $maxCount ) * 100);
+          $percentLit = "$percent_completed %";
+          print "  Status: Running Phase $TRS[7]. $completed out of $maxCount ($percentLit) have been processed in " . displayMinutes($elapsed). " (Tablespace ID: $TSID, Table ID: $TBID, Partition: $PTID)\n";
+          my $estMinutes = int(($maxCount * $elapsed) / $completed);
           my $stillToGo = int($estMinutes - $minsElapsed);
           my $finishTime = timeAdd( $nowTS, $stillToGo );
           print "          Expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes) . " in total) at $finishTime\n\n";
         }
+        if ( $loadable ) { outputReorgLoadValues(); }
+      }
+      elsif ( $_ =~ /Paused/ ) { # reorg is paused so report it
+      
+        $printedReorgs++;
 
+        if ( $firstLine ) { # first line output so print the heading
+          # Print headings ........
+          printf "\n %-25s %-8s %-19s %-19s %-15s %-9s %-9s %5s\n", "Table Name", "Type", "Reorg Start/End", "Phase Start", "Phase", "Processed", "Total", "State";
+          $firstLine = 0;
+        }
+      
+        printf " %-25s %-8s %-19s %-19s %-15s %-9s %-9s %5s\n", $TRS[1], $type, $TRS[2] . ' ' . $TRS[3], $TRS[6], $TRS[7], $TRS[9], $TRS[10], $TRS[11];
+        printf " %-25s %-8s %-19s %-19s %-15s %-9s %-9s %5s\n", ' ', ' ', $TRS[4] . ' ' . $TRS[5], ' ' ,  ' ' , ' ' , ' ' , ' ' ;
+        
+        # work out run time so far .....
+
+        my $sTime = $TRS[2] . ' ' . $TRS[3] ;
+        my ($day, $mon, $year, $hr, $min, $sec);
+        if ( $reorgDate_USFormat ) {
+          ($mon, $day, $year, $hr, $min, $sec) = ( $sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+        }
+        else {
+          ($day, $mon, $year, $hr, $min, $sec) = ( $sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+        }
+        $reorgStartTime = "$year.$mon.$day $hr:$min:$sec";
+        my $eTime = $TRS[4] . ' ' . $TRS[5] ;
+        my ($eday, $emon, $eyear, $ehr, $emin, $esec);
+        if ( $reorgDate_USFormat ) {
+          ($emon, $eday, $eyear, $ehr, $emin, $esec) = ( $eTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+        }
+        else {
+          ($eday, $emon, $eyear, $ehr, $emin, $esec) = ( $eTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+        }
+
+        if ( $debugLevel > 2 ) { printDebug( "startTime: " . $TRS[2] . ' ' . $TRS[3] . ", day:$day, month:$mon, year:$year, hour:$hr, minute:$min, seconds:$sec)", $currentRoutine); }
+        if ( $debugLevel > 2 ) { printDebug( "endTime  : " . $TRS[4] . ' ' . $TRS[5] . ", day:$eday, month:$emon, year:$eyear, hour:$ehr, minute:$emin, seconds:$esec)", $currentRoutine); }
+        my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", "$eyear-$emon-$eday $ehr:$emin:$esec", 'M');
+
+        if ( $minsElapsed > (1440 * 7 ) ) { $utilDate_warning = 1; } # utility has been running longer than 7 days - perhaps the date format is wrong
+
+        if ( $debugLevel > 0 ) { printDebug( "Minutes Elapsed: $minsElapsed, Total work: $TRS[10]. Completed work: $TRS[9]",$currentRoutine); }
+
+        if ( $TRS[9] == 0 ) { # no work done so unable to estimate completion time
+          print "  Status: Phase $TRS[8] has a total has a total work target of $TRS[10] (Tablespace ID: $TSID, Table ID: $TBID, Partition: $PTID)\n";
+          print "          No completed work figure available so no run time estimates can be generated. Has been running for " . displayMinutes($minsElapsed) . "\n\n";
+        }
+        else { # should be able to provide estimates
+          my $phs_sTime;
+          my $phs_eTime;
+          my $elapsed;
+          my ($phs_day, $phs_mon, $phs_year, $phs_hr, $phs_min, $phs_sec);
+          my ($ephs_day, $ephs_mon, $ephs_year, $ephs_hr, $ephs_min, $ephs_sec);
+          if ( $TRS[6] eq 'n/a' ) { # no phases
+            $completed = $TRS[9];
+            $maxCount = $TRS[10];
+            $elapsed = $minsElapsed; # calculated from utility stop and start times
+          }
+          else {
+            $completed = $TRS[10];
+            $maxCount = $TRS[11];
+
+            $phs_sTime = $TRS[6] . ' ' . $TRS[7] ;
+            if ( $reorgDate_USFormat ) {
+              ($phs_mon, $phs_day, $phs_year, $phs_hr, $phs_min, $phs_sec) = ( $phs_sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+            }
+            else {
+              ($phs_day, $phs_mon, $phs_year, $phs_hr, $phs_min, $phs_sec) = ( $phs_sTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+            }
+            if ( $debugLevel > 2 ) { printDebug( "startTime: " . $TRS[5] . ' ' . $TRS[6] . ", day:$phs_day, month:$phs_mon, year:$phs_year, hour:$phs_hr, minute:$phs_min, seconds:$phs_sec)", $currentRoutine); }
+            $phs_eTime = $TRS[8] . ' ' . $TRS[9] ;
+            if ( $reorgDate_USFormat ) {
+              ($ephs_mon, $ephs_day, $ephs_year, $ephs_hr, $ephs_min, $ephs_sec) = ( $phs_eTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+            }
+            else {
+              ($ephs_day, $ephs_mon, $ephs_year, $ephs_hr, $ephs_min, $ephs_sec) = ( $phs_eTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
+            }
+            if ( $debugLevel > 2 ) { printDebug( "startTime: " . $TRS[5] . ' ' . $TRS[6] . ", day:$phs_day, month:$phs_mon, year:$phs_year, hour:$phs_hr, minute:$phs_min, seconds:$phs_sec)", $currentRoutine); }
+            if ( $debugLevel > 2 ) { printDebug( "endTime  : " . $TRS[7] . ' ' . $TRS[8] . ", day:$ephs_day, month:$ephs_mon, year:$ephs_year, hour:$ephs_hr, minute:$ephs_min, seconds:$ephs_sec)", $currentRoutine); }
+            $elapsed = timeDiff ("$phs_year-$phs_mon-$phs_day $phs_hr:$phs_min:$phs_sec", "$ephs_year-$ephs_mon-$ephs_day $ephs_hr:$ephs_min:$ephs_sec", 'M');
+          }
+
+          $percent_completed = int(($completed / $maxCount ) * 100);
+          $percentLit = "$percent_completed %";
+          print "  Status: Running Phase [Paused]. $completed out of $maxCount ($percentLit) have been processed in " . displayMinutes($elapsed). " (Tablespace ID: $TSID, Table ID: $TBID, Partition: $PTID)\n";
+          my $estMinutes = int(($maxCount * $elapsed) / $completed);
+          my $stillToGo = int($estMinutes - $minsElapsed);
+          print "          The utility had been running for " . displayMinutes($elapsed) . " when it was paused. There is still " . displayMinutes($stillToGo) . " to go\n\n";
+        }
+        if ( $loadable ) { outputReorgLoadValues(); }
       }
       else {
         # end time for the reorg set so not currently active - ignore unless requested to print all
@@ -609,7 +868,7 @@ if ( $database ne "All" ) { # a database has been specified ....
             ($eday, $emon, $eyear, $ehr, $emin, $esec) = ( $eTime =~ /(\d\d).(\d\d).(\d\d\d\d).(\d\d).(\d\d).(\d\d)/) ;
           }
           if ( $debugLevel > 2 ) { printDebug( "endTime: " . $TRS[4] . ' ' . $TRS[5] . ", day:$eday, month:$emon, year:$eyear, hour:$ehr, minute:$emin, seconds:$esec)", $currentRoutine); }
-          my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", "$eyear-$emon-$eday $ehr:$emin:$esec");
+          my $minsElapsed = timeDiff ("$year-$mon-$day $hr:$min:$sec", "$eyear-$emon-$eday $ehr:$emin:$esec", 'M');
 
           if ( $debugLevel > 0 ) { printDebug( "Minutes Elapsed: $minsElapsed",$currentRoutine); }
 
@@ -619,7 +878,6 @@ if ( $database ne "All" ) { # a database has been specified ....
       }
       @TRS = ();
     }
-
   }
 
   if ( ($printedReorgs == 0) && ( $allReorgs == 0) ) { print "\nNo reorganisations to print\n"; }

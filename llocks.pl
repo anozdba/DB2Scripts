@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # llocks.pl
 #
-# $Id: llocks.pl,v 1.13 2014/05/25 22:27:17 db2admin Exp db2admin $
+# $Id: llocks.pl,v 1.17 2018/10/18 22:58:51 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a GET SNAPSHOT FOR LOCKS ON <DB> command
@@ -14,6 +14,18 @@
 #
 # ChangeLog:
 # $Log: llocks.pl,v $
+# Revision 1.17  2018/10/18 22:58:51  db2admin
+# correct issue with script when not run from home directory
+#
+# Revision 1.16  2018/10/17 01:13:31  db2admin
+# convert from commonFunction.pl to commonFunctions.pm
+#
+# Revision 1.15  2017/07/03 05:14:38  db2admin
+# modify so that only processes in LOCK-WAIT will be thought of as being blocked
+#
+# Revision 1.14  2017/05/28 02:15:52  db2admin
+# add in option to exclude the monitor threads
+#
 # Revision 1.13  2014/05/25 22:27:17  db2admin
 # correct the allocation of windows include directory
 #
@@ -55,10 +67,53 @@
 #
 # --------------------------------------------------------------------"
 
-$ID = '$Id: llocks.pl,v 1.13 2014/05/25 22:27:17 db2admin Exp db2admin $';
-@V = split(/ /,$ID);
-$Version=$V[2];
-$Changed="$V[3] $V[4]";
+my $ID = '$Id: llocks.pl,v 1.17 2018/10/18 22:58:51 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    my $tmp = rindex($0,'/');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -67,7 +122,9 @@ sub usage {
     }
   }
 
-  print "Usage: $0 -?hsSb [BLOCKERS] [SUMMARY] -d <database> [-a <appid>] [-f <filename>] [-z] [-A]
+  print "Usage: $0 -?hsSb [BLOCKERS] [SUMMARY] -d <database> [-a <appid>] [-f <filename>] [-z] [-A] [-X]
+
+       Script to format the output of a GET SNAPSHOT FOR LOCKS ON <DB> command
 
        Version $Version Last Changed on $Changed (UTC)
 
@@ -79,40 +136,12 @@ sub usage {
        -d              : Database to list 
        -a              : APPLID to list out 
        -z              : ignore entries not holding locks
+       -X              : ignore entries for event monitors (db2fw*)
        -A              : abbreviated listing
 
        Note: This script formats the output of a 'db2 get snapshot for locks on <db>' command
        \n ";
 }
-
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  BEGIN {
-    $scriptDir = 'c:\udbdba\scripts';
-    $tmp = rindex($0,"\\");
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  BEGIN {
-    $scriptDir = "c:\udbdba\scripts";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-
-require "commonFunctions.pl";
 
 # Set default values for variables
 
@@ -123,6 +152,8 @@ $DBName_Sel = "";
 $inFile = "";
 $ignoreZero = "No";
 $abbrev = "No";
+$excludeFW = 0;
+$inFWThread = 0;
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
@@ -131,7 +162,7 @@ $abbrev = "No";
 # Initialise vars for getOpt ....
 
 $getOpt_prm = 0;
-$getOpt_opt = ":?hszAf:Sb:d:a:|^BLOCKERS|^SUMMARY";
+$getOpt_opt = ":?hszAXf:Sb:d:a:|^BLOCKERS|^SUMMARY";
 
 $getOpt_optName = "";
 $getOpt_optValue = "";
@@ -174,6 +205,12 @@ while ( getOpt($getOpt_opt) ) {
      print "Only Applid $getOpt_optValue will be listed\n";
    }
    $APPID = $getOpt_optValue;
+ }
+ elsif (($getOpt_optName eq "X"))  {
+   if ( $silent ne "Yes") {
+     print "Event Monitor threads will not be displayed\n";
+   }
+   $excludeFW = 1;
  }
  elsif (($getOpt_optName eq "z"))  {
    if ( $silent ne "Yes") {
@@ -348,19 +385,23 @@ while (<LOCKPIPE>) {
       # Dump some app stuff ....
       if ( ( $ignoreZero ne "Yes") || (( $ignoreZero eq "Yes" ) && ( $LocksHeld > 0))  ) {
         if ( ($APPID eq $AppHandle) || ($APPID eq "ALL") ) {
-          $APPDETAILS{$AppHandle} = sprintf "%5s %-20s %-10s %-20s %6s\n",
-                 $AppHandle,$AppName,$AuthID,$Status,$LocksHeld;
-          if ($PrtDet eq "Y") {
-            if ($APPprt eq "N") {
-              printf "\n %5s %-20s %-10s %-20s %6s\n",
-                     'AppID','Application Name','AuthID','Status','Num Locks';
-              printf "%5s %-20s %-10s %-15s %6s\n",
-                     '-----','--------------------','---------','--------------------','---------';
-              $LOCKprt = "N";
-              $APPprt = "Y";
-            }
-            printf "%5s %-20s %-10s %-20s %6s\n",
+          if ( $AppName =~ /db2fw/ ) { $inFWThread = 1; }
+          else { $inFWThread = 0; }
+          if ( ( $excludeFW && ($AppName !~ /db2fw/)) || ! $excludeFW  ) { # dont print event handlers
+            $APPDETAILS{$AppHandle} = sprintf "%5s %-20s %-10s %-20s %6s\n",
                    $AppHandle,$AppName,$AuthID,$Status,$LocksHeld;
+            if ($PrtDet eq "Y") {
+              if ($APPprt eq "N") {
+                printf "\n %5s %-20s %-10s %-20s %6s\n",
+                       'AppID','Application Name','AuthID','Status','Num Locks';
+                printf "%5s %-20s %-10s %-15s %6s\n",
+                       '-----','--------------------','---------','--------------------','---------';
+                $LOCKprt = "N";
+                $APPprt = "Y";
+              }
+              printf "%5s %-20s %-10s %-20s %6s\n",
+                     $AppHandle,$AppName,$AuthID,$Status,$LocksHeld;
+            }
           }
         }
       }
@@ -465,11 +506,13 @@ while (<LOCKPIPE>) {
       $APPprt = "N";
 
       if ( $HoldCnt == 0 ) {
-        if ( defined($BLOCKED{$LockName}) ) {
-          $BLOCKED{$LockName} = $BLOCKED{$LockName} . " " . $AppHandle;
-        }
-        else {
-          $BLOCKED{$LockName} = $AppHandle;
+        if ( ($Status eq 'Lock-wait') ) { 
+          if ( defined($BLOCKED{$LockName}) ) {
+            $BLOCKED{$LockName} = $BLOCKED{$LockName} . " " . $AppHandle;
+          }
+          else {
+            $BLOCKED{$LockName} = $AppHandle;
+          }
         }
       }
       else {
@@ -483,53 +526,55 @@ while (<LOCKPIPE>) {
 
       # Dump some lock stuff ....
       if ( ($APPID eq $AppHandle) || ($APPID eq "ALL") ) {
-        $LOCKDETAILS{$AppHandle . $LockName} = sprintf "LOCK: %5s %-28s %-10s %-10s %3s %3s %7s %-4s %-5s %-15s %-8s %-20s\n",
-               $AppHandle,$LockName,$LockAttr,$RelFlags,$LockCnt,$HoldCnt,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName;
-        if ($PrtDet eq "Y") {
-          if ($LOCKprt eq "N") {
-            printf "\n    %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
-                   'AppID','Lock Name','Lock Attr','Rlse Flags','#LK','#HD','LockObj','Mode','Type','Tablespace Name','Schema','Table Name';
-            printf "    %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
-                   '-----','----------------------------','----------','----------','---','---','----------','----','-----','---------------','--------','--------------------';
-            $LOCKprt = "Y";
-            $currKey = "";
-            $dupCnt = 0;
-          }
-          if ( $abbrev eq "Yes" ) {
-            if ( $ObjType eq "Row" ) {
-              $TestKey = "$AppHandle,$LockAttr,$RelFlags,$Mode,$ObjType,$TSName,$TabSchema,$TabName" ;
-            }
-            else {
-              $TestKey = "$AppHandle,$LockAttr,$RelFlags,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName" ;
-            }
-
-            if ( $currKey ne $TestKey ) {
-              if ( $dupCnt > 0 ) {
-                $dupCnt++;
-                print "                  Above line repeated $dupCnt times (though $lockLit may have differed)\n";
-              }
-              else { # first time for this record 
-                printf "LK: %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
-                       $AppHandle,$LockName,$LockAttr,$RelFlags,$LockCnt,$HoldCnt,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName;
-              }
+        if ( (! $excludeFW) || ( $excludeFW && ! $inFWThread) ) {
+          $LOCKDETAILS{$AppHandle . $LockName} = sprintf "LOCK: %5s %-28s %-10s %-10s %3s %3s %7s %-4s %-5s %-15s %-8s %-20s\n",
+                 $AppHandle,$LockName,$LockAttr,$RelFlags,$LockCnt,$HoldCnt,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName;
+          if ($PrtDet eq "Y") {
+            if ($LOCKprt eq "N") {
+              printf "\n    %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
+                     'AppID','Lock Name','Lock Attr','Rlse Flags','#LK','#HD','LockObj','Mode','Type','Tablespace Name','Schema','Table Name';
+              printf "    %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
+                     '-----','----------------------------','----------','----------','---','---','----------','----','-----','---------------','--------','--------------------';
+              $LOCKprt = "Y";
+              $currKey = "";
               $dupCnt = 0;
             }
-            else {
-              $dupCnt++;
+            if ( $abbrev eq "Yes" ) {
+              if ( $ObjType eq "Row" ) {
+                $TestKey = "$AppHandle,$LockAttr,$RelFlags,$Mode,$ObjType,$TSName,$TabSchema,$TabName" ;
+              }
+              else {
+                $TestKey = "$AppHandle,$LockAttr,$RelFlags,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName" ;
+              }
+  
+              if ( $currKey ne $TestKey ) {
+                if ( $dupCnt > 0 ) {
+                  $dupCnt++;
+                  print "                  Above line repeated $dupCnt times (though $lockLit may have differed)\n";
+                }
+                else { # first time for this record 
+                  printf "LK: %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
+                         $AppHandle,$LockName,$LockAttr,$RelFlags,$LockCnt,$HoldCnt,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName;
+                }
+                $dupCnt = 0;
+              }
+              else {
+                $dupCnt++;
+              }
             }
-          }
-          else {
-            printf "LK: %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
-                   $AppHandle,$LockName,$LockAttr,$RelFlags,$LockCnt,$HoldCnt,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName;
-          }
- 
-          if ( $ObjType eq "Row" ) {
-            $currKey = "$AppHandle,$LockAttr,$RelFlags,$Mode,$ObjType,$TSName,$TabSchema,$TabName";
-            $lockLit = "Lockname and Lock Object Name";
-          }
-          else {
-            $currKey = "$AppHandle,$LockAttr,$RelFlags,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName";
-            $lockLit = "Lockname";
+            else {
+              printf "LK: %5s %-28s %-10s %-10s %3s %3s %10s %-4s %-5s %-15s %-8s %-20s\n",
+                     $AppHandle,$LockName,$LockAttr,$RelFlags,$LockCnt,$HoldCnt,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName;
+            }
+   
+            if ( $ObjType eq "Row" ) {
+              $currKey = "$AppHandle,$LockAttr,$RelFlags,$Mode,$ObjType,$TSName,$TabSchema,$TabName";
+              $lockLit = "Lockname and Lock Object Name";
+            }
+            else {
+              $currKey = "$AppHandle,$LockAttr,$RelFlags,$LockObjName,$Mode,$ObjType,$TSName,$TabSchema,$TabName";
+              $lockLit = "Lockname";
+            }
           }
         }
       }

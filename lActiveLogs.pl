@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lActiveLogs.pl
 #
-# $Id: lActiveLogs.pl,v 1.5 2017/03/30 22:58:43 db2admin Exp db2admin $
+# $Id: lActiveLogs.pl,v 1.7 2017/04/04 02:24:16 db2admin Exp db2admin $
 #
 # Description:
 # Script to List out Active Log usage
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: lActiveLogs.pl,v $
+# Revision 1.7  2017/04/04 02:24:16  db2admin
+# add in application list
+#
 # Revision 1.5  2017/03/30 22:58:43  db2admin
 # format the data from mon_get_transaction_log
 #
@@ -37,7 +40,7 @@ use strict;
 my $debugLevel = 0;
 my %monthNumber;
 
-my $ID = '$Id: lActiveLogs.pl,v 1.5 2017/03/30 22:58:43 db2admin Exp db2admin $';
+my $ID = '$Id: lActiveLogs.pl,v 1.7 2017/04/04 02:24:16 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -253,7 +256,7 @@ print "Current Log Activity Report\n\n";
 if ( $db2level > 10.1 ) { # DB2 view is avavilable
   if ( $debugLevel > 0 ) { print "Executing: $scriptDir/runSQL.pl -sp \"%%DATABASE%%=$database\" \<$SQLin | db2 -t +wp -x\n";}
 
-  my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$SQLin | db2 -t +wp -x | grep 'DataHere'`;
+  my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$SQLin | db2 -t +wp -x | grep 'DataHere`;
   my ( $t, $MEMBER, $CUR_COMMIT_DISK_LOG_READS, $CURRENT_ACTIVE_LOG, $APPLID_HOLDING_OLDEST_XACT0 ) = split (" ",$ans);
   print "mon_get_transaction_log information:\n\n";
   print "  Member                        : $MEMBER\n";
@@ -475,7 +478,41 @@ sub processLogInfo {
     printf "%12s %-16s %14s %14s %-60s\n", $logName[$i], $logStartLSN[$i], $logStartLSO[$i], $logUsed[$i], $logTrans[$i];
   }
 
+  print  "\nApplications:\n------------\n\n";
+  displayApplications();
+
 } # end of processQueueInfo
+
+sub displayApplications {
+
+  my $lineInd = 0; 
+  if ( $db2level > 10.1 ) { # DB2 view is avavilable
+    if ( $debugLevel > 0 ) { print "Executing: $scriptDir/runSQL.pl -sp \"%%DATABASE%%=$database\" \<$SQLin | db2 -t +wp -x\n";}
+    
+    if ( ! open( APPIN, "$scriptDir/runSQL.pl -sp \"%%DATABASE%%=$database\" <$scriptDir/../sql/activeApplications_V10.sql | db2 -t +wp  |" ) ) { 
+      die " Unable to run Db2 query\n $?\n"; 
+    }
+    else {
+      while ( <APPIN> ) { 
+        if ( $_ =~ /WKSTN/ ) { $lineInd = 1  ; }
+        if ( ! $lineInd ) { next; }    #skip lines till you get to the heading
+
+        print "  $_";
+      }
+    }
+#    my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$scriptDir/../sql/activeApplications_V10.sql" | db2 -t +wp -x` ;
+#    print "$ans\n";
+#    my ( $t, $MEMBER, $CUR_COMMIT_DISK_LOG_READS, $CURRENT_ACTIVE_LOG, $APPLID_HOLDING_OLDEST_XACT0 ) = split (" ",$ans);
+#    print "mon_get_transaction_log information:\n\n";
+#    print "  Member                        : $MEMBER\n";
+#    print "  Current Commit Log Reads      : $CUR_COMMIT_DISK_LOG_READS\n";
+#    print "  Current Active Log            : $CURRENT_ACTIVE_LOG\n";
+#    print "  APPLID holding the oldest Log : $APPLID_HOLDING_OLDEST_XACT0\n\n";
+  }
+  else {
+  }
+
+}
 
 sub setVariablesBasedOnVersion_Logs {
 

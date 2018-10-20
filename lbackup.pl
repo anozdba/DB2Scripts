@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lbackup.pl
 #
-# $Id: lbackup.pl,v 1.16 2014/11/11 04:55:56 db2admin Exp db2admin $
+# $Id: lbackup.pl,v 1.18 2018/03/14 02:37:19 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST BACKUP ALL FOR <db> command
@@ -14,6 +14,12 @@
 #
 # ChangeLog:
 # $Log: lbackup.pl,v $
+# Revision 1.18  2018/03/14 02:37:19  db2admin
+# add in error message for SQL2155W
+#
+# Revision 1.17  2018/02/12 20:49:16  db2admin
+# added elapsed time to the report display
+#
 # Revision 1.16  2014/11/11 04:55:56  db2admin
 # add in reference to ltrim
 #
@@ -100,9 +106,9 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt ltrim myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel);
+use commonFunctions qw(getOpt ltrim myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel displayMinutes timeDiff);
 
-$ID = '$Id: lbackup.pl,v 1.16 2014/11/11 04:55:56 db2admin Exp db2admin $';
+$ID = '$Id: lbackup.pl,v 1.18 2018/03/14 02:37:19 db2admin Exp db2admin $';
 @V = split(/ /,$ID);
 $Version=$V[2];
 $Changed="$V[3] $V[4]";
@@ -244,10 +250,10 @@ if (! open (LBACKUPPIPE,"db2 list backup all for $database |"))  {
 if ($printRep eq "Yes") {
   # Print Headings ....
   print "Backup listing from Machine: $machine Instance: $ENV{'DB2INSTANCE'} Database: $database ($Now) .... \n\n";
-  printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s\n",
-         'Op', 'Obj', 'Timestamp+Seq', 'Type', 'Dev', 'Earliest Log', 'Current Log', 'Backup ID', '#TS', 'Comment', 'Backup End', 'St', 'Location';
-  printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s\n",
-         '----', '----', '--------------------', '-----', '---', '------------', '------------', '--------------', '---', '------------------------------', '--------------', '--', '--------------------------';
+  printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s %-30s\n",
+         'Op', 'Obj', 'Timestamp+Seq', 'Type', 'Dev', 'Earliest Log', 'Current Log', 'Backup ID', '#TS', 'Comment', 'Backup End', 'St', 'Location', 'Elapsed';
+  printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s %-30s\n",
+         '----', '----', '--------------------', '-----', '---', '------------', '------------', '--------------', '---', '------------------------------', '--------------', '--', '------------------------------', '-----------------------------';
 }
 
 $machine = lc($machine);
@@ -277,6 +283,9 @@ while (<LBACKUPPIPE>) {
       else {
         exit;
       }
+    }
+    elsif ( $_ =~ /SQL2155W/) {
+      print "\n* -----------------------------------------\n$_\nReport listing stopped prematurely\n* -----------------------------------------\n";
     }
     elsif ( $_ =~ /SQL1013N/) {
       if ($printRep eq "Yes") {
@@ -325,15 +334,19 @@ while (<LBACKUPPIPE>) {
       if ( $stuffToPrint eq "Yes" ) {
         # and now the printout .....
 
+        my $fmtStart = substr($TS,0,4) . '-' . substr($TS,4,2) . '-' . substr($TS,6,2) . ' ' . substr($TS,8,2) . '.' . substr($TS,10,2) . '.' . substr($TS,12,2);
+        my $fmtEnd   = substr($End,0,4) . '-' . substr($End,4,2) . '-' . substr($End,6,2) . ' ' . substr($End,8,2) . '.' . substr($End,10,2) . '.' . substr($End,12,2);
+        my $elapsed = displayMinutes(timeDiff($fmtStart, $fmtEnd));
+
         if ($printRep eq "Yes") {
           if ( $sqlcode eq "" ) {
-            printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s\n",
-                   $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, $Comment, $End, $Status, $Location;
+            printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s %-30s\n",
+                   $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, $Comment, $End, $Status, $Location, $elapsed;
             $lastBackup = $Start;
           }
           else {
-            printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s\n",
-                   $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, "SQLCode=$sqlcode NBErrCode=$sqlerrmsg", $End, $Status, $Location;
+            printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s %-30s\n",
+                   $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, "SQLCode=$sqlcode NBErrCode=$sqlerrmsg", $End, $Status, $Location, $elapsed;
           }
         }
 
@@ -404,16 +417,21 @@ if ( $stuffToPrint eq "Yes" ) {
   # and now the printout .....
 
   if ($printRep eq "Yes") {
+
+    my $fmtStart = substr($TS,0,4) . '-' . substr($TS,4,2) . '-' . substr($TS,6,2) . ' ' . substr($TS,8,2) . '.' . substr($TS,10,2) . '.' . substr($TS,12,2);
+    my $fmtEnd   = substr($End,0,4) . '-' . substr($End,4,2) . '-' . substr($End,6,2) . ' ' . substr($End,8,2) . '.' . substr($End,10,2) . '.' . substr($End,12,2);
+    my $elapsed = displayMinutes(timeDiff($fmtStart, $fmtEnd));
+
     if ( $sqlcode eq "" ) {
-      printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s\n",
-             $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, $Comment, $End, $Status, $Location;
+      printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s %-30s\n",
+             $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, $Comment, $End, $Status, $Location, $elapsed;
       $lastBackup = $Start;
       print "\nBackup types: F - Offline N - Online I - Incremental offline O - Incremental online D - Delta offline E - Delta online R - Rebuild\n";
       print "Dev types: (Guess) <Blank> - Disk O - Other (Netbackup)\n\n";
     }
     else {
-      printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s\n",
-             $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, "SQLCode=$sqlcode NBErrCode=$sqlerrmsg", $End, $Status, $Location;
+      printf "%-4s %-4s %-20s %-5s %-3s %-12s %-12s %-14s %3s %-30s %-14s %-2s %-30s %-30s %-30s\n",
+             $Op, $Obj, $TS, $Type, $Dev, $ELog, $CLog, $BackupID, $numberOfTablespaces, "SQLCode=$sqlcode NBErrCode=$sqlerrmsg", $End, $Status, $Location, $elapsed;
       print "\nBackup types: F - Offline N - Online I - Incremental offline O - Incremental online D - Delta offline E - Delta online R - Rebuild\n";
       print "Dev types: (Guess) <Blank> - Disk O - Other (Netbackup)\n\n";
     }

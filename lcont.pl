@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lcont.pl
 #
-# $Id: lcont.pl,v 1.27 2016/07/14 22:32:35 db2admin Exp db2admin $
+# $Id: lcont.pl,v 1.30 2018/10/18 22:58:51 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST TABLESPACE CONTAINERS FOR <db> command
@@ -14,6 +14,15 @@
 #
 # ChangeLog:
 # $Log: lcont.pl,v $
+# Revision 1.30  2018/10/18 22:58:51  db2admin
+# correct issue with script when not run from home directory
+#
+# Revision 1.29  2018/10/15 23:35:43  db2admin
+# convert from commonFunction.pl to commonFunctions.pm
+#
+# Revision 1.28  2018/05/02 00:03:40  db2admin
+# modified script to try and identify mount point even if itdoesn't have access to the container
+#
 # Revision 1.27  2016/07/14 22:32:35  db2admin
 # add in snapDate to the end of the data line
 #
@@ -99,10 +108,53 @@
 #
 # --------------------------------------------------------------------
 
-$ID = '$Id: lcont.pl,v 1.27 2016/07/14 22:32:35 db2admin Exp db2admin $';
-@V = split(/ /,$ID);
-$Version=$V[2];
-$Changed="$V[3] $V[4]";
+my $ID = '$Id: lcont.pl,v 1.30 2018/10/18 22:58:51 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    my $tmp = rindex($0,'/');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -112,6 +164,8 @@ sub usage {
   }
 
   print "Usage: $0 -?hDOCSWs [DATA] [DATAONLY] [SETTSCONT] -d <database> [-t <tablespace>] [-p <container prefix>] [-v[v]]
+
+       Script to format the output of a LIST TABLESPACE CONTAINERS FOR <db> command
 
        Version $Version Last Changed on $Changed (UTC)
 
@@ -142,31 +196,6 @@ sub usage {
          
 \n";
 }
-
-
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  $levDelim = "\\";
-  use lib 'c:\udbdba\scripts';
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  $levDelim = '/';
-  BEGIN {
-    $scriptDir = "/";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-
-require "commonFunctions.pl";
 
 $GenSetTSCont = "No";
 $genData = "No";
@@ -620,10 +649,14 @@ while (<LTSPIPE>) {
               $usedDrives{$mountpt} = "1"; # keep track of the drives being used
             }
             else {
-              $mountpt_temp = `df -k $CName | grep -v Filesystem`;
+              $mountpt_temp = `df -k $CName 2>&1 | grep -v Filesystem | grep -v 'not a block'`;
               if ( $mountpt_temp eq "") { # file not a path or perhaps lacking permissions ......
-                $temp_CName = substr($CName,0,rindex($CName,"/"));
-                $mountpt_temp = `df -k $temp_CName | grep -v Filesystem`;
+                $temp_CName = $CName;
+                while ( $temp_CName ne '\/' ) {
+                  $temp_CName = substr($CName,0,rindex($temp_CName,"/"));
+                  $mountpt_temp = `df -k $temp_CName 2>&1 | grep -v Filesystem | grep -v 'not a block'`;
+                  if ( $mountpt_temp ne '' ) { last; } # found a mount point
+                }
               }
               @mountpt_info = split(/\s+/,$mountpt_temp);
               $mountpt = $mountpt_info[5]; 

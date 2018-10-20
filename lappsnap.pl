@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lappsnap.pl
 #
-# $Id: lappsnap.pl,v 1.15 2017/03/25 10:19:20 db2admin Exp db2admin $
+# $Id: lappsnap.pl,v 1.16 2018/10/17 00:46:48 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a GET SNAPSHOT FOR ALL APPLICATIONS command
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: lappsnap.pl,v $
+# Revision 1.16  2018/10/17 00:46:48  db2admin
+# convert from commonFunction.pl to commonFunctions.pm
+#
 # Revision 1.15  2017/03/25 10:19:20  db2admin
 # 1. add in US date format option
 # 2. move the connection date closer to the front of the summary line to allow sorting
@@ -63,10 +66,49 @@
 #
 # --------------------------------------------------------------------"
 
-$ID = '$Id: lappsnap.pl,v 1.15 2017/03/25 10:19:20 db2admin Exp db2admin $';
-@V = split(/ /,$ID);
-$Version=$V[2];
-$Changed="$V[3] $V[4]";
+my $ID = '$Id: lappsnap.pl,v 1.16 2018/10/17 00:46:48 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -76,6 +118,8 @@ sub usage {
   }
 
   print "Usage: $0 -?hso [ONLY] -d <database> [-a <appid>] [-L] [-C] [-M] [-B] [-S] [-v[v]] 
+
+       Script to format the output of a GET SNAPSHOT FOR ALL APPLICATIONS command
 
        Version $Version Last Changed on $Changed (UTC)
 
@@ -97,35 +141,6 @@ sub usage {
              If none of C, M, B, S, L is entered then all will be displayed
 \n" ;
 }
-
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  BEGIN {
-    $scriptDir = 'c:\udbdba\scripts';
-    $tmp = rindex($0,"\\");
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  BEGIN {
-    $scriptDir = "c:\udbdba\scripts";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-
-require "commonFunctions.pl";
 
 # Set default values for variables
 

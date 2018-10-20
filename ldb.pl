@@ -3,7 +3,7 @@
 # ldb.pl
 #
 #
-# $Id: ldb.pl,v 1.11 2016/04/15 05:46:52 db2admin Exp db2admin $
+# $Id: ldb.pl,v 1.12 2018/03/26 04:25:31 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST DB DIRECTORY command
@@ -15,6 +15,9 @@
 #
 # ChangeLog:
 # $Log: ldb.pl,v $
+# Revision 1.12  2018/03/26 04:25:31  db2admin
+# trial --database parameter
+#
 # Revision 1.11  2016/04/15 05:46:52  db2admin
 # 1. Convert to use commonFunctions.pm
 # 2. Correct minor bugs (after implementing "use strict"
@@ -53,7 +56,7 @@
 
 use strict;
 
-my $ID = '$Id: ldb.pl,v 1.11 2016/04/15 05:46:52 db2admin Exp db2admin $';
+my $ID = '$Id: ldb.pl,v 1.12 2018/03/26 04:25:31 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -130,7 +133,7 @@ my $debugLevel = 0;
 $getOpt_optName = "";
 $getOpt_optValue = "";
 
-while ( getOpt(":?hsgvf:d:i:s|^GENDEFS") ) {
+while ( getOpt(":?hsgvf:d:i:s|^GENDEFS|--^database:") ) {
  if (($getOpt_optName eq "g") || ($getOpt_optName eq "GENDEFS") )  {
    if ( $silent ne "Yes") {
      print "Catalog definitions will be produced\n";
@@ -156,7 +159,7 @@ while ( getOpt(":?hsgvf:d:i:s|^GENDEFS") ) {
      print "Debug Level now set to $debugLevel\n";
    }
  }
- elsif (($getOpt_optName eq "d"))  {
+ elsif (($getOpt_optName eq "d") || ( $getOpt_optName eq 'DATABASE') )  {
    if ( $silent ne "Yes") {
      print "Database $getOpt_optValue will be listed\n";
    }

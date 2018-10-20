@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ldbmsnap.pl
 #
-# $Id: ldbmsnap.pl,v 1.2 2014/05/25 22:26:45 db2admin Exp db2admin $
+# $Id: ldbmsnap.pl,v 1.4 2018/10/18 22:58:51 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a GET SNAPSHOT FOR DATABASE MANAGER command
@@ -14,6 +14,12 @@
 #
 # ChangeLog:
 # $Log: ldbmsnap.pl,v $
+# Revision 1.4  2018/10/18 22:58:51  db2admin
+# correct issue with script when not run from home directory
+#
+# Revision 1.3  2018/10/17 01:01:36  db2admin
+# convert from commonFunction.pl to commonFunctions.pm
+#
 # Revision 1.2  2014/05/25 22:26:45  db2admin
 # correct the allocation of windows include directory
 #
@@ -23,10 +29,53 @@
 #
 # --------------------------------------------------------------------
 
-$ID = '$Id: ldbmsnap.pl,v 1.2 2014/05/25 22:26:45 db2admin Exp db2admin $';
-@V = split(/ /,$ID);
-$Version=$V[2];
-$Changed="$V[3] $V[4]";
+my $ID = '$Id: ldbmsnap.pl,v 1.4 2018/10/18 22:58:51 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
+
+# Global Variables
+
+my $debugLevel = 0;
+my $machine;   # machine we are running on
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
+
+BEGIN {
+  if ( $^O eq "MSWin32") {
+    $machine = `hostname`;
+    $OS = "Windows";
+    $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
+    $tmp = rindex($0,'\\');
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
+  }
+  else {
+    $machine = `uname -n`;
+    $machine_info = `uname -a`;
+    @mach_info = split(/\s+/,$machine_info);
+    $OS = $mach_info[0] . " " . $mach_info[2];
+    $scriptDir = "scripts";
+    my $tmp = rindex($0,'/');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
+  }
+}
+use lib "$scriptDir";
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -36,6 +85,8 @@ sub usage {
   }
 
   print STDERR "Usage: $0 -?hs [-p <search parm>] [-V <search string>] [-f <filename> [-x|X]] [-v[v]]
+
+       Script to format the output of a GET SNAPSHOT FOR DATABASE MANAGER command
 
        Version $Version Last Changed on $Changed (UTC)
 
@@ -54,35 +105,6 @@ sub usage {
              -X only has an effect if -f and -g are specified
      \n";
 }
-
-if ( $^O eq "MSWin32") {
-  $machine = `hostname`;
-  $OS = "Windows";
-  BEGIN {
-    $scriptDir = 'c:\udbdba\scripts';
-    $tmp = rindex($0,"\\");
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-else {
-  $machine = `uname -n`;
-  $machine_info = `uname -a`;
-  @mach_info = split(/\s+/,$machine_info);
-  $OS = $mach_info[0] . " " . $mach_info[2];
-  BEGIN {
-    $scriptDir = "/udbdba/scripts";
-    $tmp = rindex($0,'/');
-    if ($tmp > -1) {
-      $scriptDir = substr($0,0,$tmp+1)  ;
-    }
-  }
-  use lib "$scriptDir";
-}
-
-require "commonFunctions.pl";
 
 # Set default values for variables
 
