@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # db2Machine.pl
 #
-# $Id: db2Machine.pl,v 1.22 2018/10/18 22:36:52 db2admin Exp db2admin $
+# $Id: db2Machine.pl,v 1.23 2018/10/21 21:01:47 db2admin Exp db2admin $
 #
 # Description:
 # Loops through all Instances/Databases on the machine (as identified by db2ilist) and display's config information
@@ -11,6 +11,9 @@
 #
 # ChangeLog:
 # $Log: db2Machine.pl,v $
+# Revision 1.23  2018/10/21 21:01:47  db2admin
+# correct issue with script when run from windows (initialisation of run directory)
+#
 # Revision 1.22  2018/10/18 22:36:52  db2admin
 # correct issue with script when not run from home directory
 #
@@ -83,7 +86,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: db2Machine.pl,v 1.22 2018/10/18 22:36:52 db2admin Exp db2admin $';
+my $ID = '$Id: db2Machine.pl,v 1.23 2018/10/21 21:01:47 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -105,7 +108,11 @@ BEGIN {
   if ( $^O eq "MSWin32") {
     $machine = `hostname`;
     $OS = "Windows";
-    $scriptDir = 'c:\udbdba\scrxipts';
+    $scriptDir = 'c:\udbdba\scripts';
+    my $tmp = rindex($0,'\\');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
     $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
     $dirSep = '\\';

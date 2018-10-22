@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # runSQL.pl
 #
-# $Id: runSQL.pl,v 1.10 2017/02/27 09:13:23 db2admin Exp db2admin $
+# $Id: runSQL.pl,v 1.11 2018/10/11 02:27:14 db2admin Exp db2admin $
 #
 # Description:
 # Script to process multiple parameter changes toa file and output the result to STDOUT
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: runSQL.pl,v $
+# Revision 1.11  2018/10/11 02:27:14  db2admin
+# correct bug - \o was being processed as a command
+#
 # Revision 1.10  2017/02/27 09:13:23  db2admin
 # Convert to use the commonFunctions package
 #
@@ -47,7 +50,7 @@
 #
 # --------------------------------------------------------------------
 
-$ID = '$Id: runSQL.pl,v 1.10 2017/02/27 09:13:23 db2admin Exp db2admin $';
+$ID = '$Id: runSQL.pl,v 1.11 2018/10/11 02:27:14 db2admin Exp db2admin $';
 @V = split(/ /,$ID);
 $Version=$V[2];
 $Changed="$V[3] $V[4]";
@@ -74,7 +77,7 @@ sub usage {
              ##INSTANCE## - Will be replaced by the value of the DB2INSTANCE or ORACLE_SID environment variable
              ##YYYYMMDD## - Will be replaced by the date in YYYYMMDD format
              ##TS##       - Will be replaced by the current timestamp (at start of script) in YY-MM-DD-HH.MM.SS format
-             ##HOME##     - Will be replaced by the home directory of the current user (for windows it will be replaced with c:\users\oraadmin)
+             ##HOME##     - Will be replaced by the home directory of the current user (for windows it will be replaced with c:\users\\oraadmin)
              ##NL##       - Will be replaced by a new line 
      \n";
 }

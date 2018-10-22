@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # db2list.pl
 #
-# $Id: db2list.pl,v 1.7 2018/10/18 22:30:24 db2admin Exp db2admin $
+# $Id: db2list.pl,v 1.8 2018/10/21 20:56:38 db2admin Exp db2admin $
 #
 # Description:
 # List out all databases on a machine
@@ -11,6 +11,9 @@
 #
 # ChangeLog:
 # $Log: db2list.pl,v $
+# Revision 1.8  2018/10/21 20:56:38  db2admin
+# correct issue with script when not run from home directory
+#
 # Revision 1.7  2018/10/18 22:30:24  db2admin
 # correct issue with script when not run from home directory
 #
@@ -33,7 +36,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: db2list.pl,v 1.7 2018/10/18 22:30:24 db2admin Exp db2admin $';
+my $ID = '$Id: db2list.pl,v 1.8 2018/10/21 20:56:38 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -55,7 +58,11 @@ BEGIN {
   if ( $^O eq "MSWin32") {
     $machine = `hostname`;
     $OS = "Windows";
-    $scriptDir = 'c:\udbdba\scrxipts';
+    $scriptDir = 'c:\udbdba\scripts';
+    my $tmp = rindex($0,'\\');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
     $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
     $dirSep = '\\';

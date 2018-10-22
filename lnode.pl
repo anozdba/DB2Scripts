@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lnode.pl
 #
-# $Id: lnode.pl,v 1.7 2018/10/18 22:58:52 db2admin Exp db2admin $
+# $Id: lnode.pl,v 1.8 2018/10/21 21:01:50 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST NODE DIRECTORY command
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: lnode.pl,v $
+# Revision 1.8  2018/10/21 21:01:50  db2admin
+# correct issue with script when run from windows (initialisation of run directory)
+#
 # Revision 1.7  2018/10/18 22:58:52  db2admin
 # correct issue with script when not run from home directory
 #
@@ -37,7 +40,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: lnode.pl,v 1.7 2018/10/18 22:58:52 db2admin Exp db2admin $';
+my $ID = '$Id: lnode.pl,v 1.8 2018/10/21 21:01:50 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -59,7 +62,11 @@ BEGIN {
   if ( $^O eq "MSWin32") {
     $machine = `hostname`;
     $OS = "Windows";
-    $scriptDir = 'c:\udbdba\scrxipts';
+    $scriptDir = 'c:\udbdba\scripts';
+    my $tmp = rindex($0,'\\');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
     $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
     $dirSep = '\\';

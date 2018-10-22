@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # diagLogStrip.pl
 #
-# $Id: diagLogStrip.pl,v 1.27 2018/10/18 22:58:49 db2admin Exp db2admin $
+# $Id: diagLogStrip.pl,v 1.28 2018/10/21 21:01:48 db2admin Exp db2admin $
 #
 # Description:
 # Script to extract significant messages from a DB2 db2diag.log file 
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: diagLogStrip.pl,v $
+# Revision 1.28  2018/10/21 21:01:48  db2admin
+# correct issue with script when run from windows (initialisation of run directory)
+#
 # Revision 1.27  2018/10/18 22:58:49  db2admin
 # correct issue with script when not run from home directory
 #
@@ -100,7 +103,7 @@
 #
 # --------------------------------------------------------------------"
 
-my $ID = '$Id: diagLogStrip.pl,v 1.27 2018/10/18 22:58:49 db2admin Exp db2admin $';
+my $ID = '$Id: diagLogStrip.pl,v 1.28 2018/10/21 21:01:48 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -122,7 +125,11 @@ BEGIN {
   if ( $^O eq "MSWin32") {
     $machine = `hostname`;
     $OS = "Windows";
-    $scriptDir = 'c:\udbdba\scrxipts';
+    $scriptDir = 'c:\udbdba\scripts';
+    my $tmp = rindex($0,'\\');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
     $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
     $dirSep = '\\';
