@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lutil.pl
 #
-# $Id: lutil.pl,v 1.40 2018/09/26 05:09:26 db2admin Exp db2admin $
+# $Id: lutil.pl,v 1.42 2018/12/14 23:44:46 db2admin Exp db2admin $
 #
 # Description:
 # Script to reformat the output of the following commands:
@@ -17,6 +17,14 @@
 #
 # ChangeLog:
 # $Log: lutil.pl,v $
+# Revision 1.42  2018/12/14 23:44:46  db2admin
+# 1. correct the calculation of time to go in a reorg phase
+# 2. add in total utility run time
+#
+# Revision 1.41  2018/11/02 04:53:52  db2admin
+# use the database in the returned output where possible
+# correct the allocation of the use scripts directory
+#
 # Revision 1.40  2018/09/26 05:09:26  db2admin
 # add in parameter -x to allow a portion of the elapsed time to be excluded when calulating estimates
 #
@@ -101,16 +109,22 @@ my $scriptDir; # directory the script ois running out of
 my $tmp ;
 my $machine_info;
 my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
 
 BEGIN {
   if ( $^O eq "MSWin32") {
     $machine = `hostname`;
     $OS = "Windows";
     $scriptDir = 'c:\udbdba\scrxipts';
+    $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
     if ($tmp > -1) {
       $scriptDir = substr($0,0,$tmp+1)  ;
     }
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
   }
   else {
     $machine = `uname -n`;
@@ -122,6 +136,11 @@ BEGIN {
     if ($tmp > -1) {
       $scriptDir = substr($0,0,$tmp+1)  ;
     }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
   }
 }
 
@@ -165,7 +184,7 @@ my $totalWork = '';
 
 # -------------------------------------------------------------------
 
-my $ID = '$Id: lutil.pl,v 1.40 2018/09/26 05:09:26 db2admin Exp db2admin $';
+my $ID = '$Id: lutil.pl,v 1.42 2018/12/14 23:44:46 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -202,6 +221,10 @@ sub outputLoadValues {
 
   my $utilID = trim($utlValues_ID{'ID'});
   my $uc_database = uc($database);
+
+  if (defined($utlValues_ID{'Database Name'}) ) {
+    $uc_database = uc($utlValues_ID{'Database Name'});
+  }
 
   my $converted_type = $utlValues_ID{'Type'};
   $converted_type =~ s/ /_/g ; 
@@ -738,9 +761,10 @@ if ( $database ne "All" ) { # a database has been specified ....
           $percentLit = "$percent_completed %";
           print "  Status: Running Phase $TRS[7]. $completed out of $maxCount ($percentLit) have been processed in " . displayMinutes($elapsed). " (Tablespace ID: $TSID, Table ID: $TBID, Partition: $PTID)\n";
           my $estMinutes = int(($maxCount * $elapsed) / $completed);
-          my $stillToGo = int($estMinutes - $minsElapsed);
+          my $stillToGo = int($estMinutes - $elapsed);
+          my $totalRunTime = int($stillToGo + $minsElapsed);
           my $finishTime = timeAdd( $nowTS, $stillToGo );
-          print "          Expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes) . " in total) at $finishTime\n\n";
+          print "          Phase expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes) . " in total for this phase, " . displayMinutes($totalRunTime) . " for the complete run) at $finishTime\n\n";
         }
         if ( $loadable ) { outputReorgLoadValues(); }
       }
