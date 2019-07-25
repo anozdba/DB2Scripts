@@ -1,7 +1,7 @@
 # --------------------------------------------------------------------
 # offlineNetbackupBackup.ps1
 #
-# $Id: offlineNetbackupBackup.ps1,v 1.1 2017/08/01 06:07:14 db2admin Exp db2admin $
+# $Id: offlineNetbackupBackup.ps1,v 1.3 2018/10/21 20:35:05 db2admin Exp db2admin $
 #
 # Description:
 # Script to do an offline backup of an indicated database
@@ -13,6 +13,12 @@
 #
 # ChangeLog:
 # $Log: offlineNetbackupBackup.ps1,v $
+# Revision 1.3  2018/10/21 20:35:05  db2admin
+# correct bug with the way the timesatmps were generated
+#
+# Revision 1.2  2018/10/15 22:25:06  db2admin
+# add in realtime status updating
+#
 # Revision 1.1  2017/08/01 06:07:14  db2admin
 # Initial revision
 #
@@ -38,6 +44,10 @@ if ( $database -eq "" ) {
 # logging 
 
 $hostname = $env:computername
+$statusfile = "$env:TEMP\backup_status_${hostname}_${instance}_${database}" 
+$STATUS = "Started"
+$MSG = ""
+$BACKUPCMD = ""
 
 If (Test-Path logs\offlineNetbackupBackup_${hostname}_${instance}_$database.log){
 	Remove-Item logs\offlineNetbackupBackup_${hostname}_${instance}_$database.log
@@ -113,6 +123,12 @@ write-output "Backing up $database to Netbackup using the following options: $op
 
 write-output ">>>>>> Processing database $database"
 
+# write the status record
+$STARTED = Get-Date -format 'yyyy-MM-dd hh:mm:ss'
+write-output "DB2#$STARTED#$STARTED#$hostname#$instance#$database#OFFLINE#$STATUS#offlineNetbackupBackup.ps1#$BACKUPCMD#" | Out-File $statusfile -encoding ascii
+start-process pscp.exe "-i Putty\Keys\WindowsSCPPrivateKey.ppk $statusfile db2admin@192.168.1.1:realtimeBackupStatus " -wait -nonewwindow -RedirectStandardOutput c:\temp\$uniqueFile_$hostname.PSCP
+get-content c:\temp\$uniqueFile_$hostname.PSCP | write-output
+
 $ts = Get-Date -format yyyy-MM-dd-hh:mm
 
 write-output "$ts Connect being issued"
@@ -120,6 +136,8 @@ $proc = Start-Process db2 "connect to $database" -wait -nonewwindow -Passthru -R
 get-content c:\temp\${uniqueFile}_${hostname}_${instance}_$database.temp | write-output
 
 if ( $proc.ExitCode -ne 0 ) { 
+  $STATUS = "Failed at connect"
+  $MSG = $proc.ExitCode
   write-output "Connect to database returned $($proc.ExitCode)"
   $send_email = $true
 }
@@ -132,6 +150,8 @@ else {
 
   $ts = Get-Date -format yyyy-MM-dd-hh:mm
   if ( $proc.ExitCode -ne 0 ) { # non-zero return from backup
+    $STATUS = "Failed at quiesce"
+    $MSG = $proc.ExitCode
     write-output "$ts Database Quiesce was not successful. Return code was $($proc.ExitCode)"
     $send_email = $true
   }
@@ -144,10 +164,19 @@ else {
     get-content c:\temp\${uniqueFile}_${hostname}_${instance}_$database.temp | write-output
 
     if ( $proc.ExitCode -ne 0 ) { # non-zero return from backup
+	  $STATUS = "Failed at terminate"
+      $MSG = $proc.ExitCode
       write-output "Connection Terminate was not successful. Return code was $($proc.ExitCode)"
       $send_email = $true
     }
     else { # all ready to go for the backup .... continue with backup (flag that unquiesce needs to be done
+      $BACKUPCMD = "backup database $database load $load $options"
+      # write the status record
+      $CTIME = Get-Date -format 'yyyy-MM-dd hh:mm:ss'
+      write-output "DB2#$STARTED#$CTIME#$hostname#$instance#$database#OFFLINE#$STATUS#offlineNetbackupBackup.ps1#$BACKUPCMD#$MSG" | Out-File  $statusfile -encoding ascii
+      start-process pscp.exe "-i Putty\Keys\WindowsSCPPrivateKey.ppk $statusfile db2admin@192.168.1.1:realtimeBackupStatus " -wait -nonewwindow -RedirectStandardOutput c:\temp\$uniqueFile_$hostname.PSCP
+      get-content c:\temp\$uniqueFile_$hostname.PSCP | write-output
+
       $ts = Get-Date -format yyyy-MM-dd-hh:mm
       write-output "$ts Database Quiesce successful"
       write-output "$ts Offline Database Backup being started"
@@ -158,9 +187,12 @@ else {
       if ( $proc.ExitCode -ne 0 ) { # non-zero return from backup
         write-output "$ts Offline Database Backup was not successful. Return code was $($proc.ExitCode)"
         $send_email = $true
+		$STATUS = "Failed"
+        $MSG = $proc.ExitCode
       }
       else { # backup was successful
-
+        $STATUS = "Successful"
+        $MSG = ""
         # write out a record of the successful backup and send it off to the consolidation server
         write-output "$ts $hostname $instance $database" | Out-File "logs\${hostname}_${instance}_$database.log" 
         get-content c:\temp\${uniqueFile}_${hostname}_${instance}_$database.temp  | Out-File "logs\${hostname}_${instance}_$database.log" -append
@@ -207,15 +239,26 @@ $ts = Get-Date -format yyyy-MM-dd-hh:mm
 
 write-output "$ts Finished $scriptName"
 
-Stop-Transcript
+# write the status record
+$CTIME = Get-Date -format 'yyyy-MM-dd hh:mm:ss'
+write-output "DB2#$STARTED#$CTIME#$hostname#$instance#$database#OFFLINE#$STATUS#offlineNetbackupBackup.ps1#$BACKUPCMD#$MSG" | Out-File $statusfile -encoding ascii
+start-process pscp.exe "-i Putty\Keys\WindowsSCPPrivateKey.ppk $statusfile db2admin@192.168.1.1:realtimeBackupStatus " -wait -nonewwindow -RedirectStandardOutput c:\temp\$uniqueFile_$hostname.PSCP
+get-content c:\temp\$uniqueFile_$hostname.PSCP | write-output
 
 if ( $send_email ) { # something bad happened
   # construct the body of the message
-  write-output "results from the offline backup of $hostname / $instance / $database`n" | Out-File c:\temp\$uniqueFile_$hostname.mailBody
+  $ts = Get-Date -format yyyy-MM-dd-hh:mm
+  write-output "$ts Sending Email to $email reporting failure"
+  Stop-Transcript
+
+  write-output "results from the offline backup of $hostname / $instance / $database`n" | Out-File c:\temp\$uniqueFile_$hostname.mailBody -Encoding utf8
   write-output "The last successful backup details are:`n" | Out-File c:\temp\$uniqueFile_$hostname.mailBody -append
   get-content logs\${hostname}_${instance}_$database.log | Out-File c:\temp\$uniqueFile_$hostname.mailBody -append
 
   $body = get-content "c:\temp\$uniqueFile_$hostname.mailBody" | Out-String
 
   Send-MailMessage -To "webmaster@KAGJCM.com.au" -From "do_not_reply@KAGJCM.com.au" -Subject "$hostname - Offline Backup of $database failed" -SmtpServer smtp.KAGJCM.local -Body $body -Attachments "logs\offlineNetbackupBackup_${hostname}_${instance}_$database.log" 
+}
+else  {
+  Stop-Transcript
 }

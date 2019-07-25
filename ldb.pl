@@ -3,7 +3,7 @@
 # ldb.pl
 #
 #
-# $Id: ldb.pl,v 1.12 2018/03/26 04:25:31 db2admin Exp db2admin $
+# $Id: ldb.pl,v 1.13 2019/01/25 03:12:41 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST DB DIRECTORY command
@@ -15,6 +15,9 @@
 #
 # ChangeLog:
 # $Log: ldb.pl,v $
+# Revision 1.13  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.12  2018/03/26 04:25:31  db2admin
 # trial --database parameter
 #
@@ -56,7 +59,7 @@
 
 use strict;
 
-my $ID = '$Id: ldb.pl,v 1.12 2018/03/26 04:25:31 db2admin Exp db2admin $';
+my $ID = '$Id: ldb.pl,v 1.13 2019/01/25 03:12:41 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -115,7 +118,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel);
 
 my $infile = "";
 my $DBName_Sel = "";

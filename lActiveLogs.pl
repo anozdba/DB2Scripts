@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lActiveLogs.pl
 #
-# $Id: lActiveLogs.pl,v 1.7 2017/04/04 02:24:16 db2admin Exp db2admin $
+# $Id: lActiveLogs.pl,v 1.11 2019/03/12 23:32:04 db2admin Exp db2admin $
 #
 # Description:
 # Script to List out Active Log usage
@@ -14,6 +14,19 @@
 #
 # ChangeLog:
 # $Log: lActiveLogs.pl,v $
+# Revision 1.11  2019/03/12 23:32:04  db2admin
+# correct mistake in checking for database name
+#
+# Revision 1.10  2019/03/12 23:25:38  db2admin
+# accept default value for database
+# alter the way that the silent variable is used
+#
+# Revision 1.9  2019/01/25 04:08:18  db2admin
+# correct bug with previous change where replace done incorrectly
+#
+# Revision 1.8  2019/01/25 03:12:40  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.7  2017/04/04 02:24:16  db2admin
 # add in application list
 #
@@ -40,7 +53,7 @@ use strict;
 my $debugLevel = 0;
 my %monthNumber;
 
-my $ID = '$Id: lActiveLogs.pl,v 1.7 2017/04/04 02:24:16 db2admin Exp db2admin $';
+my $ID = '$Id: lActiveLogs.pl,v 1.11 2019/03/12 23:32:04 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -94,7 +107,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel timeDiff);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel timeDiff);
 
 # Subroutines and functions ......
 
@@ -137,7 +150,7 @@ sub usage {
 
 }
 
-my $silent = "No";
+my $silent = 0;
 my $database = '';
 my $number = 1;
 my $wait = 60;
@@ -159,28 +172,28 @@ while ( getOpt(":?hasv9d:n:w:f:") ) {
    exit;
  }
  elsif (($getOpt_optName eq "s"))  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif (($getOpt_optName eq "f"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "File $getOpt_optValue will be read\n";
    }
    $inFile = $getOpt_optValue;
  }
  elsif ($getOpt_optName eq "a")  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "All transaction data will be displayed\n";
    }
    $all = 1;
  }
  elsif ($getOpt_optName eq "9")  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Pre version 10 formatting will be used\n";
    }
    $pre10 = 1;
  }
  elsif ($getOpt_optName eq "d")  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Database $getOpt_optValue will be used\n";
    }
    $database = $getOpt_optValue;
@@ -192,7 +205,7 @@ while ( getOpt(":?hasv9d:n:w:f:") ) {
       usage ("Value supplied for the wait parameter (-w) is not numeric");
       exit;
    }
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Monitor will wait $wait seconds before iteration\n";
    }
    $waitMS = $wait * 1000;
@@ -204,13 +217,13 @@ while ( getOpt(":?hasv9d:n:w:f:") ) {
       usage ("Value supplied for number parameter (-n) is not numeric");
       exit;
    }
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Monitor will iterate $number times\n";
    }
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Debug Level set to $debugLevel\n";
    }
  }
@@ -242,6 +255,19 @@ $user = getpwuid($<);
                     'July' =>  '07', 'August' =>  '08', 'September' =>  '09', 'October' =>  '10', 'November' =>  '11', 'December' =>  '12' );
 
 # create the data to report on
+
+if ( $database eq '' ) {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    print ("WARNING: A database should be provided\n");
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
+}
 
 my $SQLin = "$scriptDir/../sql/listActiveLogs.sql";
 

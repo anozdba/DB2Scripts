@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # llocks2.pl
 #
-# $Id: llocks2.pl,v 1.3 2016/09/21 02:35:38 db2admin Exp db2admin $
+# $Id: llocks2.pl,v 1.6 2019/05/07 05:30:38 db2admin Exp db2admin $
 #
 # Description:
 # Script to identify lock realtionships as displayed by db2pd
@@ -14,6 +14,15 @@
 #
 # ChangeLog:
 # $Log: llocks2.pl,v $
+# Revision 1.6  2019/05/07 05:30:38  db2admin
+# use DB2DBDFT variable to supply default database
+#
+# Revision 1.5  2019/05/07 00:46:42  db2admin
+# add in lock hierachy to speed the identification of the prime lock holder
+#
+# Revision 1.4  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.3  2016/09/21 02:35:38  db2admin
 # correct code to cope with transactions waiting on transactions that are waiting
 #
@@ -59,14 +68,25 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel);
 
 # -------------------------------------------------------------------
 
-my $ID = '$Id: llocks2.pl,v 1.3 2016/09/21 02:35:38 db2admin Exp db2admin $';
+my $ID = '$Id: llocks2.pl,v 1.6 2019/05/07 05:30:38 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
+
+my @blockedQ;
+my %indent = ();                      # indent level for each applID
+my %activeLockHolders = ();           # array of applids of active lock holders
+my $processSection = "";
+my %appHandl = ();  # initialise the array
+my %blocked = ();   # list of trans being blocked
+my %blocking = ();  # list of trans being blocked
+my %waiting = ();   # array of all waiting trans
+my %granted = ();   # array of transactions owning locks
+my %allTran = ();   # array of all transactions
 
 # Subroutines and functions ......
 
@@ -89,7 +109,7 @@ sub usage {
 
        -h or -?        : This help message
        -s              : Silent mode (in this program only suppesses parameter messages)
-       -d              : database where locking is occurring
+       -d              : database where locking is occurring [default uses DB2DBDFT env variable if available]
        -f              : file containing the output of a db2pd -transactions -db dmg1db -locks wait command
                          if not supplied then the script will execute the command
        -A              : show all locks
@@ -100,10 +120,31 @@ sub usage {
              db2pd -transactions -db dmg1db -locks wait
 \n";
 
-}
+} # end of usage
 
+sub lookForBlocked {
 
-my $silent = "No";
+  # ----------------------------------------------------------
+  # Loop through the data structure and identify those applids
+  # that are currently waiting on the passed applid
+  # Essentially just putting objects into the blockedQ array and 
+  # setting indent levels for each tran
+  # ----------------------------------------------------------
+
+  my $parent = shift;
+  my $currentID = shift;
+  my $level = shift;
+
+  push ( @blockedQ, "$parent|$currentID" ) ;
+  $indent{$currentID} = $level;                      # retain the indent level for this entry
+  my @blockedTrans = split(" ",$blocking{$currentID});
+  foreach my $tran ( @blockedTrans ) {    # looping through each of the application records
+    lookForBlocked ( $currentID, $tran, $level+4); # check to see if the child is a blocker
+  }
+
+} # end of lookForBlocked
+
+my $silent = 0;
 my $debugLevel = 0;
 my $inFile = '';
 my $database = '';
@@ -124,26 +165,26 @@ while ( getOpt(":?hsvf:d:A") ) {
    $silent = "Yes";
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Databse $getOpt_optValue will be checked\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "A"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "All locks will be displayed\n";
    }
    $showAll = 'Yes';
  }
  elsif (($getOpt_optName eq "f"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Lock information will be read from file $getOpt_optValue\n";
    }
    $inFile = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Debug Level set to $debugLevel\n";
    }
  }
@@ -169,8 +210,17 @@ my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
 my $NowTS = "$year.$month.$day $hour:$minute:$second";
 
 if ( ($database eq '') && ( $inFile eq '') ) {
-  usage ("Database parameter must be entered");
-  exit;
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
 my @fields;
@@ -183,14 +233,6 @@ if ( $inFile eq "" ) { # issue the command
 else { # read the input from the supplied file name
   if (! open (LOCKPIPE,"<$inFile"))  { die "Can't open $inFile $!\n"; }
 }
-
-my $processSection = "";
-my %appHandl = ();  # initialise the array
-my %blocked = ();
-my %granted = ();
-my %allTran = ();
-
-printf "%6s   %6s %-26s %10s %4s %6s %9s \n",'Tran', 'Appl','Lock Name','Type','Mode','Status','Owner App';
 
 while (<LOCKPIPE>) {
   if ( $debugLevel > 0 ) { print ">>>>>$_"; }
@@ -227,16 +269,19 @@ while (<LOCKPIPE>) {
       $sts = $bits[5];
       $owner = $bits[6];
     }
-    $rec = sprintf "%6s %6s %26s %10s %4s %6s ...... Blocked by %9s\n",$tranHandl, $appHandl{$tranHandl},$lockName,$type,$mode,$sts,$owner;
-    $blocking_rec = sprintf "%6s   %6s %26s %10s %4s %6s %9s \n",$tranHandl, $appHandl{$tranHandl},$lockName,$type,$mode,$sts,$owner;
+    $rec = sprintf "%6s %6s %26s %14s %4s %6s ...... Blocked by %9s\n",$tranHandl, $appHandl{$tranHandl},$lockName,$type,$mode,$sts,$owner;
+    $blocking_rec = sprintf "%6s   %6s %26s %14s %4s %6s %9s \n",$tranHandl, $appHandl{$tranHandl},$lockName,$type,$mode,$sts,$owner;
 
     # place an entry on the waiting queue if it is waiting
     if ( $sts eq "W" ) { # waiting lock ...
-      if ( defined($blocked{$owner}) ) { # already created this entry
-        $blocked{$owner} .= "  $rec";
+      $waiting{$tranHandl} = " (Waiting for tran $owner)";     # flag this tran as a waiter
+      if ( defined($blocking{$owner}) ) { # already created this entry
+        $blocking{$owner} .= "  $tranHandl";
+        $blocked{$owner}  .= "  $rec";
       }
       else {
-        $blocked{$owner} = "  $rec";
+        $blocking{$owner} = "  $tranHandl";
+        $blocked{$owner}  = "  $rec";
       }
     }
 
@@ -250,7 +295,7 @@ while (<LOCKPIPE>) {
         $granted{$tranHandl} = "$blocking_rec";
       }
     }
-
+    
     # Just save off tran information
 
     if ( defined($allTran{$tranHandl}) ) { # already created this entry
@@ -270,7 +315,35 @@ while (<LOCKPIPE>) {
 
 # now print out the accumulated data .....
 
-print "\nTransactions being Blocked:\n\n";
+# identify active transactions (i.e. not waiting)
+
+foreach my $tran ( sort by_key keys %blocking) {       # looping through each of the application records
+  if ( ! defined($waiting{$tran}) ) {                   # not waiting so it is active
+    $activeLockHolders{$tran} = 1;
+  }
+}
+
+# gather blocking information for each of the active threads
+foreach my $lh (sort keys %activeLockHolders ) {
+  lookForBlocked( 0, $lh, 0) ;  
+}
+
+# print out the locking hierachy
+
+my $currentParent = '0';
+my $currentIndent = 0;
+
+print "\nLock waiting hierachy ....\n\n";
+foreach my $tran ( @blockedQ ) {
+  my ( $parent, $child ) = split (/\|/, $tran);
+
+  $currentIndent = ' ' x $indent{$child};
+  print $currentIndent . "Tran: $child, Applid: " . $appHandl{$child} . $waiting{$child} . "\n";
+
+}
+
+print "\nTransactions being Blocked:\n";
+printf "\n%6s   %6s %-26s %14s %4s %6s %9s \n",'Tran', 'Appl','Lock Name','Type','Mode','Status','Owner App';
 
 foreach my $key (sort by_key keys %blocked ) {
   print $allTran{$key};
@@ -280,7 +353,8 @@ foreach my $key (sort by_key keys %blocked ) {
 }
 
 if ( $showAll eq 'Yes' ) {
-  print "Transactions Holding locks:\n\n";
+  print "Transactions Holding locks:\n";
+  printf "\n%6s   %6s %-26s %14s %4s %6s %9s \n",'Tran', 'Appl','Lock Name','Type','Mode','Status','Owner App';
 
   foreach my $key (sort by_key keys %granted ) {
     print $granted{$key};
@@ -294,3 +368,4 @@ if ( $num_blocked == 0 ) { # No waiting locks found
 }
 
 exit;
+

@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # onlineDiskBackup.ksh
 #
-# $Id: onlineDiskBackup.ksh,v 1.7 2018/09/06 00:54:43 db2admin Exp db2admin $
+# $Id: onlineDiskBackup.ksh,v 1.8 2019/06/24 05:57:34 db2admin Exp db2admin $
 #
 # Description:
 # Online Disk Backup script (policy schedule set in db2.conf)
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: onlineDiskBackup.ksh,v $
+# Revision 1.8  2019/06/24 05:57:34  db2admin
+# timestamp the backup log file
+#
 # Revision 1.7  2018/09/06 00:54:43  db2admin
 # convert data item separator from , to #
 #
@@ -176,12 +179,13 @@ done
 
 export machine=`uname -n`
 tgtdate=`date '+%Y-%m-%d'`
+TS=`date '+%Y-%m-%d-%H.%M.%S'`
 
 # ---------------------------------------------------------------------------
 # Backup the database
 # ---------------------------------------------------------------------------
 
-exec >logs/backup_$database.log 2>&1
+exec >logs/backup_${database}_$TS.log 2>&1
 
 echo `date` "Parameters being used:"
 echo `date` "  Database: $database"
@@ -295,7 +299,7 @@ fi
 
 echo `date` Finished $0
 if [[ $SEND_EMAIL != 0 ]]; then
-  cat logs/backup_$database.log | unix2dos | mailx -s"$tgtdate: *** FAIL *** Online backup of $database on $machine" $email
+  cat logs/backup_${database}_$TS.log | unix2dos | mailx -s"$tgtdate: *** FAIL *** Online backup of $database on $machine" $email
   RC=8
 fi
 

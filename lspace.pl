@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lspace.pl
 #
-# $Id: lspace.pl,v 1.5 2018/10/21 21:01:50 db2admin Exp db2admin $
+# $Id: lspace.pl,v 1.8 2019/05/07 05:37:43 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST TABLESPACE CONTAINERS FOR <db> command
@@ -14,6 +14,15 @@
 #
 # ChangeLog:
 # $Log: lspace.pl,v $
+# Revision 1.8  2019/05/07 05:37:43  db2admin
+# use DB2DBDFT to supply the default value for database
+#
+# Revision 1.7  2019/02/07 04:18:56  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.6  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.5  2018/10/21 21:01:50  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -32,7 +41,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: lspace.pl,v 1.5 2018/10/21 21:01:50 db2admin Exp db2admin $';
+my $ID = '$Id: lspace.pl,v 1.8 2019/05/07 05:37:43 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -82,7 +91,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -104,7 +113,7 @@ sub usage {
        -s              : Silent mode
        -S or SETTSCONT : Generate the SET Tablespace containers commands
        -C              : Consolidate space on set tablespace containers command
-       -d              : Database to list
+       -d              : Database to list [defaults to the environment variable DB2DBDFT]
        -t              : Limit output to this tablespace
        -q              : sets the debug level -qq set it to 2 -qqq sets it to 3 etc
        -p              : When printing SET TS CONTAINER commands prefix the file names with this string\n";
@@ -115,7 +124,7 @@ $genData = "No";
 $printRep = "Yes";
 $TSName = "ALL";
 $database = "";
-$silent = "No";
+$silent = 0;
 $stem = "";
 $consolidate = "No";
 $debugLevel = 0;
@@ -134,13 +143,13 @@ $getOpt_optValue = "";
 
 while ( getOpt($getOpt_opt) ) {
  if (($getOpt_optName eq "D") || ($getOpt_optName eq "DATA") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data output file will be produced\n";
    }
    $genData = "Yes";
  }
  elsif (($getOpt_optName eq "O") || ($getOpt_optName eq "DATAONLY") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Standard report will not be produced\n";
    }
    $printRep = "No";
@@ -150,20 +159,20 @@ while ( getOpt($getOpt_opt) ) {
    exit;
  }
  elsif (($getOpt_optName eq "S") || ($getOpt_optName eq "SETTSCONT") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Set TS Cont commands will be generated\n";
    }
    $GenSetTSCont = "Yes";
  }
  elsif (($getOpt_optName eq "C" ))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Containers will be consolidated into a single container on Set Tablespace Containers\n";
    }
    $consolidate = "Yes";
  }
  elsif (($getOpt_optName eq "q" ))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Debug level will be incremented to $debugLevel\n";
    }
  }
@@ -171,19 +180,19 @@ while ( getOpt($getOpt_opt) ) {
    $silent = "Yes";
  }
  elsif (($getOpt_optName eq "p"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "File names will be prefixed with $getOpt_optValue\n";
    }
    $stem = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "DB2 connection will be made to $getOpt_optValue\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "t"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only Tablespace $getOpt_optValue will be listed\n";
    }
    $TSName = uc($getOpt_optValue);
@@ -195,19 +204,19 @@ while ( getOpt($getOpt_opt) ) {
  else { # handle other entered values ....
    if ( $database eq "" ) {
      $database = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "DB2 connection will be made to $database\n";
      }
    }
    elsif ( $TSName eq "ALL" ) {
      $TSName = uc($getOpt_optValue);
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "Only tablespace $TSName will be listed\n";
      }
    }
    elsif ( $stem eq "" ) {
      $stem = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "File names will be prefixed with $stem\n";
      }
    }
@@ -232,6 +241,23 @@ $second = substr("0" . $second, length($second)-1,2);
 $month = substr("0" . $month, length($month)-1,2);
 $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
 $NowTS = "$year.$month.$day $hour:$minute:$second";
+
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
+}
+
+print "\n*** This functionality of this script has mainly been replaced by added functionality in the lts.pl script\n";
+print "*** If this script doesn't give you what you need then try 'lts.pl -d $database -mc'\n\n";
 
 if ( $database eq "" ) {
   usage 'Database must be supplied';

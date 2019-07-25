@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lauths.pl
 #
-# $Id: lauths.pl,v 1.13 2016/04/13 01:00:36 db2admin Exp db2admin $
+# $Id: lauths.pl,v 1.14 2019/01/25 03:12:41 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the database and tablespace auths of a selected database
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: lauths.pl,v $
+# Revision 1.14  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.13  2016/04/13 01:00:36  db2admin
 # Adjust script to cope with multiple versions of DB2
 # Alter script to use commonFunctions.pm module
@@ -59,7 +62,7 @@
 
 use strict;
 
-my $ID = '$Id: lauths.pl,v 1.13 2016/04/13 01:00:36 db2admin Exp db2admin $';
+my $ID = '$Id: lauths.pl,v 1.14 2019/01/25 03:12:41 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -96,7 +99,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel);
 
 sub usage {
   if ( $#_ > -1 ) {

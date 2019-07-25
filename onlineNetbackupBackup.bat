@@ -192,10 +192,10 @@ if NOT %SEND_EMAIL% == 0 (
   
   REM Send an email
   if "%DB%" EQU "" (
-    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Online Backup of UNKNOWN failed" mpl_it_dba_udb@KAGJCM.com.au NONE "results from the online backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
+    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Online Backup of UNKNOWN failed" DEFAULT_EMAIL@KAGJCM.com.au NONE "results from the online backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
   ) ELSE (
-    REM echo cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Online Backup of %DB% failed" mpl_it_dba_udb@KAGJCM.com.au NONE "results from the online backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
-    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Online Backup of %DB% failed" mpl_it_dba_udb@KAGJCM.com.au NONE "results from the online backup of %machine% / %DB2INSTANCE% / %DB%. To rerun this backup log on to server %machine%, open up task scheduler, open up the DBA sub folder and then run the entry that has a description of Backup_%database%" %OUTPUT_FILE%  %OUTPUT_LOG%
+    REM echo cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Online Backup of %DB% failed" DEFAULT_EMAIL@KAGJCM.com.au NONE "results from the online backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
+    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Online Backup of %DB% failed" DEFAULT_EMAIL@KAGJCM.com.au NONE "results from the online backup of %machine% / %DB2INSTANCE% / %DB%. To rerun this backup log on to server %machine%, open up task scheduler, open up the DBA sub folder and then run the entry that has a description of Backup_%database%" %OUTPUT_FILE%  %OUTPUT_LOG%
   )
 )
 

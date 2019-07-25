@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lutil.pl
 #
-# $Id: lutil.pl,v 1.42 2018/12/14 23:44:46 db2admin Exp db2admin $
+# $Id: lutil.pl,v 1.50 2019/06/25 04:48:19 db2admin Exp db2admin $
 #
 # Description:
 # Script to reformat the output of the following commands:
@@ -17,6 +17,30 @@
 #
 # ChangeLog:
 # $Log: lutil.pl,v $
+# Revision 1.50  2019/06/25 04:48:19  db2admin
+# implement the -i option to only print a single utility ID
+#
+# Revision 1.49  2019/05/07 05:52:10  db2admin
+# use DB2DBDFT to provide default database
+#
+# Revision 1.48  2019/04/12 01:27:07  db2admin
+# add in a -T option to provide a forced total work figure
+#
+# Revision 1.47  2019/02/07 04:18:56  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.46  2019/02/07 03:26:11  db2admin
+# *** empty log message ***
+#
+# Revision 1.45  2019/01/30 04:05:06  db2admin
+# correct error where variable name incorrectly removed
+#
+# Revision 1.44  2019/01/25 04:08:18  db2admin
+# correct bug with previous change where replace done incorrectly
+#
+# Revision 1.43  2019/01/25 03:12:40  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.42  2018/12/14 23:44:46  db2admin
 # 1. correct the calculation of time to go in a reorg phase
 # 2. add in total utility run time
@@ -146,7 +170,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel timeAdd timeDiff displayMinutes $datecalc_debugLevel);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel  timeDiff displayMinutes performTimestampAddition processDuration);
 
 # Global Variables
 
@@ -154,11 +178,12 @@ my $currentSection = 'ID';
 my $inFile = '';
 my $inReorg = '';
 my $debugLevel = 0;
-$datecalc_debugLevel = 0;
+$cF_debugLevel = 0;
 my %utlValues_ID = ();
 my %utlValues_Phase = ();
 my $nowTS;
-my $database = 'All';
+my $database = '';
+my $utilityID = 'All';
 my $allUtilities = 0;
 my $printedUtilities = 0;
 my $allReorgs = 0;
@@ -181,10 +206,11 @@ my $completed = 0;
 my $loadStartTime;
 my $reorgStartTime;
 my $totalWork = '';
+my $forceWork = 0;
 
 # -------------------------------------------------------------------
 
-my $ID = '$Id: lutil.pl,v 1.42 2018/12/14 23:44:46 db2admin Exp db2admin $';
+my $ID = '$Id: lutil.pl,v 1.50 2019/06/25 04:48:19 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -249,6 +275,7 @@ sub printUtilityValues {
 
   if ( $database ne 'All' && uc($database) ne uc($utlValues_ID{'Database Name'}) ) { return; } # this database is not required
 
+  if ( ($utilityID ne 'All') && ($utilityID ne trim($utlValues_ID{'ID'}) ) ) { return; } # this database is not required
 
   $printedUtilities++;
   
@@ -276,11 +303,16 @@ sub printUtilityValues {
 
     if (defined($utlValues_ID{'Completed Work'})) { ($completed, $workType) = ( $utlValues_ID{'Completed Work'} =~ /(\d*) (.*)/); }
     
-    if (defined($utlValues_ID{'Total Work'})) { 
-      ($total,$workType) = ( $utlValues_ID{'Total Work'} =~ /(\d*) (.*)/); 
-    }
-    elsif ( $totalWork ne '' ) {
+    if ( $forceWork && ( $totalWork ne '' ) ) { #  force the entered total work to be the total work
       $total = $totalWork;
+    }
+    else {
+      if (defined($utlValues_ID{'Total Work'})) { 
+        ($total,$workType) = ( $utlValues_ID{'Total Work'} =~ /(\d*) (.*)/); 
+      }
+      elsif ( $totalWork ne '' ) {
+        $total = $totalWork;
+      }
     } 
     
     if ( $debugLevel > 0 ) { printDebug( "Minutes Elapsed: $minsElapsed, Total work is defined as $total $workType", $currentRoutine); }
@@ -305,7 +337,8 @@ sub printUtilityValues {
         print "  Status: Running $utlValues_ID{'Description'} $utlValues_ID{'Type'}. $completed $workType out of $total ($percentLit) have been processed in " . displayMinutes($minsElapsed) . "\n";
         my $estMinutes = int(($total * ($minsElapsed - $excludeMinutes)) / $completed);
         my $stillToGo = int($estMinutes - ($minsElapsed -  $excludeMinutes));
-        my $finishTime = timeAdd( $nowTS, $stillToGo );
+        my ($isDuration, $durationTS) = processDuration("$stillToGo minutes",'T');
+        my $finishTime = performTimestampAddition( $nowTS, $durationTS );
         print "          Expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes+$excludeMinutes) . " in total) at $finishTime\n\n"; 
       }
     }
@@ -330,11 +363,16 @@ sub printUtilityValues {
 
     if (defined($utlValues_Phase{'Completed Work'})) { ($completed, $workType) = ( $utlValues_Phase{'Completed Work'} =~ /(\d*) (.*)/); }
     
-    if (defined($utlValues_Phase{'Total Work'})) { 
-      ($total,$workType) = ( $utlValues_Phase{'Total Work'} =~ /(\d*) (.*)/); 
+    if ( $forceWork ) { # for the use of the entered work figure
+       $total = $totalWork;
     }
-    elsif ( $totalWork ne '' ) {
-      $total = $totalWork;
+    else {
+      if (defined($utlValues_Phase{'Total Work'})) { 
+        ($total,$workType) = ( $utlValues_Phase{'Total Work'} =~ /(\d*) (.*)/); 
+      }
+      elsif ( $totalWork ne '' ) {
+        $total = $totalWork;
+      }
     } 
     
     if ( $debugLevel > 0 ) { printDebug( "%% Minutes Elapsed: $minsElapsed, Total work is defined as $total $workType", $currentRoutine); }
@@ -360,7 +398,8 @@ sub printUtilityValues {
         print "  Status: Running $utlValues_Phase{'Description'} phase. $completed $workType out of $total ($percentLit) have been processed in " . displayMinutes($minsElapsed) . "\n";
         my $estMinutes = int(($total * ($minsElapsed - $excludeMinutes)) / $completed);
         my $stillToGo = int($estMinutes - ($minsElapsed - $excludeMinutes));
-        my $finishTime = timeAdd( $nowTS, $stillToGo );
+        my ($isDuration, $durationTS) = processDuration("$stillToGo minutes",'T');
+        my $finishTime = performTimestampAddition( $nowTS, $durationTS );
         print "          Expected to complete in " . displayMinutes($stillToGo) . " mins (" . displayMinutes($estMinutes+$excludeMinutes) . " in total) at $finishTime\n\n"; 
       }
     }
@@ -381,7 +420,7 @@ sub usage {
     }
   }
 
-  print "Usage: $0 [-?hs] [-A] -d <database> [-i <ID Name>] [-f <file name>] [-v[v]] [-r <reorg file>] [-x minutes] [-u|-e] [-L] [-t <total work>]
+  print "Usage: $0 [-?hs] [-A] -d <database> [-i <ID Name>] [-f <file name>] [-v[v]] [-r <reorg file>] [-x minutes] [-u|-e] [-L] [-t <total work>] [-T <total work>]
 
        Script to reformat obtained information about running utilities
 
@@ -389,7 +428,7 @@ sub usage {
 
        -h or -?        : This help message
        -s              : Silent mode (in this program only suppesses parameter messages)
-       -d              : database to query
+       -d              : database to query [default will be supplied by DB2DBDFT]
        -A              : print all reorgs (ignored if database not supplied)
        -i              : ID of utility to display (defaults to All)
        -f              : file to reads utility information from (defaults to dynamically retrieving it)
@@ -397,6 +436,7 @@ sub usage {
        -r              : file to reads reorg information from (defaults to dynamically retrieving it)
                          Note only db2pd reorg statements can be fed in through this file
        -t              : total work to be used if no total work figure found
+       -T              : total work to be used even if a total work figure found
        -e              : reorg date format is in European format dd/mm/yyyy
        -u              : reorg date format is in US format mm/dd/yyyy [default]
        -U              : non-reorg utilities date format is in US format mm/dd/yyyy [default is in European date format]
@@ -425,23 +465,25 @@ sub usage {
 
 # set environment variable defaults if they exist
 
+
+my $holdMSG ='';
 my $tmp = $ENV{"LCL_LUTIL_DATEFMT"};
 if ( defined($tmp) ) { 
   if ( uc($tmp) eq 'US' ) { $utilDate_USFormat = 1; }
   else { $utilDate_USFormat = 0; }
-  print "Default utility date format being set from environment variable LCL_LUTIL_DATEFMT ($tmp)\n"; 
+  $holdMSG = "Default utility date format being set from environment variable LCL_LUTIL_DATEFMT ($tmp)\n"; 
 }
 
 $tmp = $ENV{"LCL_LUTIL_DATEFMT_REORG"};
 if ( defined($tmp) ) { 
   if ( uc($tmp) eq 'US' ) { $reorgDate_USFormat = 1; }
   else { $reorgDate_USFormat = 0; }
-  print "Default reorg date format being set from environment variable LCL_LUTIL_DATEFMT_REORG ($tmp)\n"; 
+  $holdMSG .= "Default reorg date format being set from environment variable LCL_LUTIL_DATEFMT_REORG ($tmp)\n"; 
 }
 
-my $silent = "No";
+my $silent = 0;
 my $printAllReorgs = 0;
-my $utilityID = 'All';
+$utilityID = 'All';
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
@@ -449,65 +491,72 @@ my $utilityID = 'All';
 
 # Initialise vars for getOpt ....
 
-while ( getOpt(":?hsLvx:d:Ai:f:r:uUet:") ) {
+while ( getOpt(":?hsLvx:d:Ai:f:r:uUet:T:") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
  }
  elsif (($getOpt_optName eq "s"))  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Databse $getOpt_optValue will be checked\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "A"))  {
    $printAllReorgs = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "All reorgs (active and completed) will be displayed\n";
    }
  }
  elsif (($getOpt_optName eq "L"))  {
    $loadable = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Information will also be printed in a loadable format\n";
    }
  }
  elsif (($getOpt_optName eq "i"))  {
    $utilityID = $getOpt_optValue;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only utility ID $getOpt_optValue will be displayed\n";
    }
  }
  elsif (($getOpt_optName eq "t"))  {
    $totalWork = $getOpt_optValue;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "If needed a total work figure of $getOpt_optValue will be used\n";
+   }
+ }
+ elsif ( $getOpt_optName eq "T" )  {
+   $forceWork = 1;
+   $totalWork = $getOpt_optValue;
+   if ( ! $silent ) {
+     print "A figure of $getOpt_optValue will be used as the total work figure even if a total work figure found\n";
    }
  }
  elsif (($getOpt_optName eq "f"))  {
    $inFile = $getOpt_optValue;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Utility data will be read in from $getOpt_optValue\n";
    }
  }
  elsif (($getOpt_optName eq "e"))  {
    $reorgDate_USFormat = 0;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "DB2PD Reorg date format is ISO format\n";
    }
  }
  elsif (($getOpt_optName eq "U"))  {
    $utilDate_USFormat = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Utility (non reorg) date format is US format\n";
    }
  }
  elsif (($getOpt_optName eq "u"))  {
    $reorgDate_USFormat = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "DB2PD Reorg date format is US format\n";
    }
  }
@@ -517,26 +566,26 @@ while ( getOpt(":?hsLvx:d:Ai:f:r:uUet:") ) {
      usage ("x Parameter value ($getOpt_optValue) must be numeric");
    }
    else {
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "$getOpt_optValue minutes will be subtracted from the elapsed time when calculating estimated times\n";
      }
    }
  }
  elsif (($getOpt_optName eq "r"))  {
    $inReorg = $getOpt_optValue;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "DB2PD Reorg data will be read in from $getOpt_optValue\n";
    }
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   $datecalc_debugLevel++;
-   if ( $silent ne "Yes") {
+   $cF_debugLevel++;
+   if ( ! $silent ) {
      print "Debug Level set to $debugLevel\n";
    }
  }
  else { # handle other entered values ....
-   usage ("Parameter $getOpt_optName : This parameter is unknown");
+   usage ("Parameter $getOpt_optValue : This parameter is unknown");
    exit;
  }
 }
@@ -556,13 +605,27 @@ $month = substr("0" . $month, length($month)-1,2);
 my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
 $nowTS = "$year.$month.$day $hour:$minute:$second";
 
-if ( ($database eq '') ) {
-  usage ("Database parameter must be entered");
-  exit;
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    $database = 'All';    # just do every database
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
-if ( $silent ne "Yes" ) {
-  if ( $database eq "All" ) {
+if ( ! $silent ) {
+  if ( $holdMSG ne '' ) {
+    print "$holdMSG";
+  }
+}
+
+if ( ! $silent  ) {
+  if ( uc($database) eq "ALL" ) {
     print "Note: Reorganisations are only printed when a database name is supplied\n";
   }
 }
@@ -763,7 +826,8 @@ if ( $database ne "All" ) { # a database has been specified ....
           my $estMinutes = int(($maxCount * $elapsed) / $completed);
           my $stillToGo = int($estMinutes - $elapsed);
           my $totalRunTime = int($stillToGo + $minsElapsed);
-          my $finishTime = timeAdd( $nowTS, $stillToGo );
+          my ($isDuration, $durationTS) = processDuration("$stillToGo minutes",'T');
+          my $finishTime = performTimestampAddition( $nowTS, $durationTS );
           print "          Phase expected to complete in " . displayMinutes($stillToGo) . " (" . displayMinutes($estMinutes) . " in total for this phase, " . displayMinutes($totalRunTime) . " for the complete run) at $finishTime\n\n";
         }
         if ( $loadable ) { outputReorgLoadValues(); }

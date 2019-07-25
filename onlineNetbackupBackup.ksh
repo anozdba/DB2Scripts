@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # onlineNetbackupBackup.ksh
 #
-# $Id: onlineNetbackupBackup.ksh,v 1.12 2018/09/06 00:56:52 db2admin Exp db2admin $
+# $Id: onlineNetbackupBackup.ksh,v 1.13 2019/05/06 01:44:52 db2admin Exp db2admin $
 #
 # Description:
 # Online Netbackup Backup script (policy schedule set in db2.conf)
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: onlineNetbackupBackup.ksh,v $
+# Revision 1.13  2019/05/06 01:44:52  db2admin
+# timestamp the backup log file
+#
 # Revision 1.12  2018/09/06 00:56:52  db2admin
 # change data item seperator from , to #
 #
@@ -195,12 +198,13 @@ done
 
 export machine=`uname -n`
 tgtdate=`date '+%Y-%m-%d'`
+TS=`date '+%Y-%m-%d-%H.%M.%S'`
 
 # ---------------------------------------------------------------------------
 # Backup the database
 # ---------------------------------------------------------------------------
 
-exec >logs/backup_$database.log 2>&1
+exec >logs/backup_${database}_$TS.log 2>&1
 
 echo `date` "Parameters being used:"
 echo `date` "  Database: $database"

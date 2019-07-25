@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lcont.pl
 #
-# $Id: lcont.pl,v 1.31 2018/10/21 21:01:49 db2admin Exp db2admin $
+# $Id: lcont.pl,v 1.34 2019/05/07 04:36:44 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST TABLESPACE CONTAINERS FOR <db> command
@@ -14,6 +14,15 @@
 #
 # ChangeLog:
 # $Log: lcont.pl,v $
+# Revision 1.34  2019/05/07 04:36:44  db2admin
+# add insupport for the DB2DBDFT env variable to supply a default database name
+#
+# Revision 1.33  2019/02/07 04:18:55  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.32  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.31  2018/10/21 21:01:49  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -111,7 +120,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: lcont.pl,v 1.31 2018/10/21 21:01:49 db2admin Exp db2admin $';
+my $ID = '$Id: lcont.pl,v 1.34 2019/05/07 04:36:44 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -161,7 +170,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -182,7 +191,7 @@ sub usage {
        -s              : Silent mode
        -S or SETTSCONT : Generate the SET Tablespace containers commands
        -C              : Consolidate space on set tablespace containers command
-       -d              : Database to list
+       -d              : Database to list [defaults to the environment variable DB2DBDFT]
        -F              : generate a unique list of commands to determine free space for all container mount points
        -t              : Limit output to this tablespace
        -v              : set debug level
@@ -209,7 +218,7 @@ $genData = "No";
 $printRep = "Yes";
 $TSName = "ALL";
 $database = "";
-$silent = "No";
+$silent = 0;
 $stem = "";
 $consolidate = "No";
 $genDriveDir = "No";
@@ -229,13 +238,13 @@ $getOpt_optValue = "";
 
 while ( getOpt($getOpt_opt) ) {
  if (($getOpt_optName eq "D") || ($getOpt_optName eq "DATA") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data output file will be produced\n";
    }
    $genData = "Yes";
  }
  elsif (($getOpt_optName eq "O") || ($getOpt_optName eq "DATAONLY") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Standard report will not be produced\n";
    }
    $printRep = "No";
@@ -246,24 +255,24 @@ while ( getOpt($getOpt_opt) ) {
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "debugLevel set to $debugLevel\n";
    }
  }
  elsif (($getOpt_optName eq "F"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Free space commands will be generated for all container mount points\n";
    }
    $genDriveDir = "Yes";
  }
  elsif (($getOpt_optName eq "S") || ($getOpt_optName eq "SETTSCONT") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Set TS Cont commands will be generated\n";
    }
    $GenSetTSCont = "Yes";
  }
  elsif (($getOpt_optName eq "C" ))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Containers will be consolidated into a single container on Set Tablespace Containers\n";
    }
    $consolidate = "Yes";
@@ -275,13 +284,13 @@ while ( getOpt($getOpt_opt) ) {
    $stem = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "DB2 connection will be made to $getOpt_optValue\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "t"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only Tablespace $getOpt_optValue will be listed\n";
    }
    $TSName = uc($getOpt_optValue);
@@ -293,19 +302,19 @@ while ( getOpt($getOpt_opt) ) {
  else { # handle other entered values ....
    if ( $database eq "" ) {
      $database = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "DB2 connection will be made to $database\n";
      }
    }
    elsif ( $TSName eq "ALL" ) {
      $TSName = uc($getOpt_optValue);
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "Only tablespace $TSName will be listed\n";
      }
    }
    elsif ( $stem eq "" ) {
      $stem = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "File names will be prefixed with $stem\n";
      }
    }
@@ -333,10 +342,22 @@ $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
 $NowTS = "$year.$month.$day $hour:$minute:$second";
 $snapDate = "$year.$month.$day";
 
-if ( $database eq "" ) {
-  usage 'Database must be supplied';
-  exit;
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
+
+print "\n*** This functionality of this script has mainly been replaced by added functionality in the lts.pl script\n";
+print "*** If this script doesn't give you what you need then try 'lts.pl -d $database -mc'\n\n";
 
 # format the stem
 
@@ -345,7 +366,7 @@ if ( substr($stem,$stemLen-1,1) eq $levDelim ) {
   if ( $debugLevel > 0 ) { print "\$stem terminated with a $levDelim - will remove\n"; }
   $stem = substr($stem,0,$stemLen-1);
 }
-if ( $silent ne "Yes" ) {
+if ( ! $silent ) {
   if ( $stem ne "" ) { print "String '$stem' will be prefixed to every file name generated\n"; }
 }
 
@@ -407,9 +428,6 @@ else {
 
 $t = `${pos}ltscmd.bat >ltscmd.out`;
 $t = `db2 -f ${pos}lcont.sql -r lcont.out`;
-#print "Cont output: $t\n";
-
-#die "stop here";
 
 if (! open (LTSPIPE,"${pos}ltscmd.bat |"))  {
         die "Can't run second ltscmd.bat! $!\n";

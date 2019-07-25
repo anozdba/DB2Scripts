@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # runSQL.pl
 #
-# $Id: runSQL.pl,v 1.11 2018/10/11 02:27:14 db2admin Exp db2admin $
+# $Id: runSQL.pl,v 1.12 2019/01/25 03:12:41 db2admin Exp db2admin $
 #
 # Description:
 # Script to process multiple parameter changes toa file and output the result to STDOUT
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: runSQL.pl,v $
+# Revision 1.12  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.11  2018/10/11 02:27:14  db2admin
 # correct bug - \o was being processed as a command
 #
@@ -50,7 +53,7 @@
 #
 # --------------------------------------------------------------------
 
-$ID = '$Id: runSQL.pl,v 1.11 2018/10/11 02:27:14 db2admin Exp db2admin $';
+$ID = '$Id: runSQL.pl,v 1.12 2019/01/25 03:12:41 db2admin Exp db2admin $';
 @V = split(/ /,$ID);
 $Version=$V[2];
 $Changed="$V[3] $V[4]";
@@ -111,7 +114,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel);
 
 # Set default values for variables
 

@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # llogs.pl
 #
-# $Id: llogs.pl,v 1.14 2018/10/21 21:01:50 db2admin Exp db2admin $
+# $Id: llogs.pl,v 1.17 2019/06/24 05:30:56 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST HISTORY ARCHIVE LOG ALL FOR <db>
@@ -14,6 +14,16 @@
 #
 # ChangeLog:
 # $Log: llogs.pl,v $
+# Revision 1.17  2019/06/24 05:30:56  db2admin
+# alter the way the silent parameter is processed
+# add in default database processing
+#
+# Revision 1.16  2019/02/07 04:18:55  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.15  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.14  2018/10/21 21:01:50  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -61,7 +71,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: llogs.pl,v 1.14 2018/10/21 21:01:50 db2admin Exp db2admin $';
+my $ID = '$Id: llogs.pl,v 1.17 2019/06/24 05:30:56 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -111,7 +121,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -143,7 +153,7 @@ sub usage {
 
 # Set default values for variables
 
-$silent = "No";
+$silent = 0;
 $database = "";
 $fileLogs = "";
 $compare = "";
@@ -168,34 +178,34 @@ while ( getOpt($getOpt_opt) ) {
    exit;
  }
  elsif (($getOpt_optName eq "s") )  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print STDERR "debug level has now been set to $debugLevel\n";
    }
  }
  elsif (($getOpt_optName eq "c"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print STDERR "Only records greater than $getOpt_optValue will be listed\n";
    }
    $compare = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "x"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print STDERR "Report will not be produced\n";
    }
    $doReport = "No";
  }
  elsif (($getOpt_optName eq "f"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print STDERR "File to be processed is $getOpt_optValue\n";
    }
    $fileLogs = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print STDERR "Logs for database $getOpt_optValue will be listed\n";
    }
    $database = $getOpt_optValue;
@@ -207,13 +217,13 @@ while ( getOpt($getOpt_opt) ) {
  else { # handle other entered values ....
    if ( $database eq "" ) {
      $database = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print STDERR "Logs for database $getOpt_optValue will be listed\n";
      }
    }
    elsif ( $fileLogs eq "" ) {
      $fileLogs = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print STDERR "File to be read is $getOpt_optValue\n";
      }
    }
@@ -243,8 +253,23 @@ $NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
 $NowTS = "$year-$month-$day-$hour.$minute.$second";
 
 if ( ($database eq "") && ($fileLogs eq "") ) {
-  usage ("Database name MUST be supplied");
-  exit;
+  if ( $database eq "") {
+    my $tmpDB = $ENV{'DB2DBDFT'};
+    if ( ! defined($tmpDB) ) {
+      usage ("Database name MUST be supplied");
+      exit;
+    }
+    else {
+      if ( ! $silent ) {
+        print "Database defaulted to $tmpDB\n";
+      }
+      $database = $tmpDB;
+    }
+  }
+  else {
+    usage ("Database name MUST be supplied");
+    exit;
+  }
 }
 
 @period = (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23);

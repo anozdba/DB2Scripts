@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ladmcfg.pl
 #
-# $Id: ladmcfg.pl,v 1.7 2018/10/21 21:01:49 db2admin Exp db2admin $
+# $Id: ladmcfg.pl,v 1.9 2019/02/07 04:18:54 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a GET ADM CFG command
@@ -16,6 +16,12 @@
 #
 # ChangeLog:
 # $Log: ladmcfg.pl,v $
+# Revision 1.9  2019/02/07 04:18:54  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.8  2019/01/25 03:12:40  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.7  2018/10/21 21:01:49  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -40,7 +46,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: ladmcfg.pl,v 1.7 2018/10/21 21:01:49 db2admin Exp db2admin $';
+my $ID = '$Id: ladmcfg.pl,v 1.9 2019/02/07 04:18:54 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -90,7 +96,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {

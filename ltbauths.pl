@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ltbauths.pl
 #
-# $Id: ltbauths.pl,v 1.11 2018/10/21 21:01:51 db2admin Exp db2admin $
+# $Id: ltbauths.pl,v 1.14 2019/05/07 05:44:10 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the table auths of a selected table
@@ -14,6 +14,15 @@
 #
 # ChangeLog:
 # $Log: ltbauths.pl,v $
+# Revision 1.14  2019/05/07 05:44:10  db2admin
+# use env variable DB2DBDFT to supply default database
+#
+# Revision 1.13  2019/02/07 04:18:56  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.12  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.11  2018/10/21 21:01:51  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -51,7 +60,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: ltbauths.pl,v 1.11 2018/10/21 21:01:51 db2admin Exp db2admin $';
+my $ID = '$Id: ltbauths.pl,v 1.14 2019/05/07 05:44:10 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -101,7 +110,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -118,7 +127,7 @@ sub usage {
 
        -h or -?         : This help message
        -s               : Silent mode
-       -d               : Database to list
+       -d               : Database to list [default supplied by DB2DBDFT environment variable]
        -S               : schema name to include
        -t               : table to list
        -x               : table name entered is the exact name 
@@ -270,8 +279,8 @@ sub generateGrants {
 
 # Set default values for variables
 
-$silent = "No";
-$database = "All";
+$silent = 0;
+$database = "";
 $generate = "No";
 $tabname = "";
 $exact = "No";
@@ -299,37 +308,37 @@ while ( getOpt($getOpt_opt) ) {
    $silent = "Yes";
  }
  elsif (($getOpt_optName eq "S"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Table schema to be selected is $getOpt_optValue\n";
    }
    $schema = uc($getOpt_optValue);
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Database $getOpt_optValue will be listed\n";
    }
    $database = uc($getOpt_optValue);
  }
  elsif (($getOpt_optName eq "x"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "The database name entered is the exact name of the database\n";
    }
    $exact = "Yes";
  }
  elsif (($getOpt_optName eq "t"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Table $getOpt_optValue will be listed\n";
    }
    $tabname = uc($getOpt_optValue);
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "debug level set to $debugLevel\n";
    }
  }
  elsif (($getOpt_optName eq "g"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Grants will be generated\n";
    }
    $generate = "Yes";
@@ -339,9 +348,9 @@ while ( getOpt($getOpt_opt) ) {
    exit;
  }
  else { # handle other entered values ....
-   if ( $database eq "All" ) {
+   if ( $database eq "" ) {
      $database = uc($getOpt_optValue);
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print STDERR "Database $getOpt_optValue will be listed\n";
      }
    }
@@ -376,9 +385,18 @@ if ( $tabname eq "" ) {
   exit;
 }
 
-if ( $database eq "" ) {
-  usage ("Database Parameter must be entered");
-  exit;
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
 if (! open(STDCMD, ">lauthcmd.bat") ) {

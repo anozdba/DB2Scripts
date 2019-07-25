@@ -270,7 +270,7 @@ if [[ $DO_UNQSCE_FLAG != 0 ]]
 fi
 RC=0
 if [[ $SEND_EMAIL != 0 ]]; then
-  cat $OUTPUT_FILE  | mailx -s"Offline backup of $DB" mpl_it_dba_udb@KAGJCM.com.au 
+  cat $OUTPUT_FILE  | mailx -s"Offline backup of $DB" DEFAULT_EMAIL@KAGJCM.com.au 
   RC=8
 fi
 

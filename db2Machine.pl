@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # db2Machine.pl
 #
-# $Id: db2Machine.pl,v 1.23 2018/10/21 21:01:47 db2admin Exp db2admin $
+# $Id: db2Machine.pl,v 1.26 2019/07/11 22:11:29 db2admin Exp db2admin $
 #
 # Description:
 # Loops through all Instances/Databases on the machine (as identified by db2ilist) and display's config information
@@ -11,6 +11,16 @@
 #
 # ChangeLog:
 # $Log: db2Machine.pl,v $
+# Revision 1.26  2019/07/11 22:11:29  db2admin
+# add in option to exclude the netbackup check
+# covert to use strict
+#
+# Revision 1.25  2019/02/07 04:18:52  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.24  2019/01/29 00:04:11  db2admin
+# change the parameter names referenced in commonFunctions.pm
+#
 # Revision 1.23  2018/10/21 21:01:47  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -86,7 +96,9 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: db2Machine.pl,v 1.23 2018/10/21 21:01:47 db2admin Exp db2admin $';
+use strict;
+
+my $ID = '$Id: db2Machine.pl,v 1.26 2019/07/11 22:11:29 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -136,7 +148,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -145,7 +157,7 @@ sub usage {
     }
   }
 
-  print "Usage: $0 -?hs[F][r] [-d <database>] [-f <filename>] 
+  print "Usage: $0 -?hs[F][r] [-d <database>] [-f <filename>] [-N]
 
        Script to loop through all Instances/Databases on the machine (as identified by db2ilist) and display's config information
 
@@ -156,57 +168,57 @@ sub usage {
        -d              : Database to generate the DB2LOOK for (defaults to All)
        -f              : File name to use as input instead of doing a db2ilist command
        -F              : Use default file input (identical to -f db2ilist.txt)
+       -N              : dont get netbackup information
        -r              : Generate a report of the information
        \n";
 }
 
 # Set default values for variables
 
-$silent = "No";
-$database = "All";
-$inFile = "";
-$report = "No";
+my $silent = 0;
+my $database = "All";
+my $inFile = "";
+my $report = "No";
+my $getNB = 1;
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
 # ----------------------------------------------------
 
-# Initialise vars for getOpt ....
-
-$getOpt_prm = 0;
-$getOpt_opt = ":?hsd:f:Fr";
-
-$getOpt_optName = "";
-$getOpt_optValue = "";
-
-while ( getOpt($getOpt_opt) ) {
+while ( getOpt(":?hsd:f:FrN") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
  }
  elsif (($getOpt_optName eq "s"))  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif (($getOpt_optName eq "r"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "A report will be produced instead of the default load format output\n";
    }
    $report = "Yes";
  }
  elsif (($getOpt_optName eq "f"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Instance list will be read from $getOpt_optValue\n";
    }
    $inFile = $getOpt_optValue;
  }
+ elsif (($getOpt_optName eq "N"))  {
+   if ( ! $silent ) {
+     print "Netbackup information wont be collected\n";
+   }
+   $getNB = 0;
+ }
  elsif (($getOpt_optName eq "F"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Instance list will be read from db2ilist.txt\n";
    }
    $inFile = "db2ilist.txt";
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only database $getOpt_optValue will be listed\n";
    }
    $database = $getOpt_optValue;
@@ -214,7 +226,7 @@ while ( getOpt($getOpt_opt) ) {
  else { # handle other entered values ....
    if ( $database eq "All" ) {
      $database = $getOpt_optValue;
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "Only database $getOpt_optValue will be listed\n";
      }
    }
@@ -230,75 +242,103 @@ while ( getOpt($getOpt_opt) ) {
 # ----------------------------------------------------
 
 chomp $machine;
-@ShortDay = ('Sun','Mon','Tue','Wed','Thu','Fri','Sat');
-@monthName = ('January','February','March','April','May','June','July','August','September','October','November','December');
-($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
-$year = 1900 + $yearOffset;
+my @ShortDay = ('Sun','Mon','Tue','Wed','Thu','Fri','Sat');
+my @monthName = ('January','February','March','April','May','June','July','August','September','October','November','December');
+my ($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
+my $year = 1900 + $yearOffset;
 $month = $month + 1;
 $hour = substr("0" . $hour, length($hour)-1,2);
 $minute = substr("0" . $minute, length($minute)-1,2);
 $second = substr("0" . $second, length($second)-1,2);
 $month = substr("0" . $month, length($month)-1,2);
-$day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
-$Now = "$year.$month.$day $hour:$minute:$second";
-$NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
-$NowDay = "$year$month$day";
-$NowMonth = "$day $monthName[$month-1], $year at $hour:$minute";
+my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
+my $Now = "$year.$month.$day $hour:$minute:$second";
+my $NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
+my $NowDay = "$year$month$day";
+my $NowMonth = "$day $monthName[$month-1], $year at $hour:$minute";
 
-$intallDir = "";
+my $intallDir = "";
+
+# Global variables
+
+my @cmdout_info;
+my @cmp_info;
+my @cmp;
+my @nbv;
+my %appConns;
+my $dbname;
+my $dbvers;
+my $fp;
+my $fplevel;
+my $installDir;
+my $service_port;
+my $serviceFile;
+my $svcLine;
+my $SYSPath;
+my $tmpDB;
+my $tmpLogDir;
+
+my $NBVersion = "";
+my $lastPatch = "";
+my $patchName = '';
+my $liveUpdateSeqNum;
+my $maxSeq = 0;
+my $section;
+my $result = '';
+my @prm = ();
 
 # if windows then find out Netbackup version 
 
 if ($OS eq "Windows") {
-  $NBVersion = "";
-  $lastPatch = "";
-  $maxSeq = 0;
-  $result = `del c:\\nbregedit.dmp`;
-  $result = `regedit /E:A c:\\nbregedit.dmp HKEY_LOCAL_MACHINE\\SOFTWARE\\Veritas`;
-  if ( !open (REGKEY,"<c\:\\nbregedit.dmp") )  { die "Cant open c\:\\nbregedit.dmp! $!\n"; }
-  while ( <REGKEY> ) {
+  
+  if ( $getNB ) { # get the netbackup information
+    my $result = `del c:\\nbregedit.dmp`;
+    $result = `regedit /E:A c:\\nbregedit.dmp HKEY_LOCAL_MACHINE\\SOFTWARE\\Veritas`;
+    if ( !open (REGKEY,"<c\:\\nbregedit.dmp") )  { die "Cant open c\:\\nbregedit.dmp! $!\n"; }
+    while ( <REGKEY> ) {
 #        print $_;
-    if ( $_ =~ /NetBackup\\CurrentVersion\]/ ) { 
-      $section = "CurrentVersion"; 
-      next;
-    }
-    if ( $_ =~ /NetBackup\\CurrentVersion\\Agents\]/ ) { 
-      $section = ""; 
-      next;
-    }
-    if ( ($_ =~ /VERSION"=/) && ($section eq "CurrentVersion" ) ) { 
-      @prm = split(/=/,$_) ;
-      $NBVersion = substr($prm[1],1,length($prm[1])-3);
-      next;
-    }
-    if ( $_ =~ /Patches\\NetBackup\]/ ) { 
-      $section = "Patches"; 
-      next;
-    }
-    if ( $_ =~ /Veritas\\Symantec\]/ ) { 
-      $section = ""; 
-      next;
-    }
-    if ( $_ =~ /NetBackup for Lotus Notes/ ) { 
-      $section = ""; 
-      next;
-    }
-    if ( ($_ =~ /PatchName/) && ($section eq "Patches" ) ) { 
-      @prm = split(/=/,$_) ;
-      $patchName = substr($prm[1],1,length($prm[1])-3);
-      next;
-    }
-    if ( ($_ =~ /LiveUpdateSeqNum/) && ($section eq "Patches" ) ) { 
-      @prm = split(/=/,$_) ;
-      $liveUpdateSeqNum = substr($prm[1],1,length($prm[1])-3);
-      if ( $liveUpdateSeqNum > $maxSeq ) {
-        $maxSeq = $liveUpdateSeqNum;
-        $lastPatch = $patchName;
+      if ( $_ =~ /NetBackup\\CurrentVersion\]/ ) { 
+        $section = "CurrentVersion"; 
+        next;
       }
-      next;
+      if ( $_ =~ /NetBackup\\CurrentVersion\\Agents\]/ ) { 
+        $section = ""; 
+        next;
+      }
+      if ( ($_ =~ /VERSION"=/) && ($section eq "CurrentVersion" ) ) { 
+        @prm = split(/=/,$_) ;
+        $NBVersion = substr($prm[1],1,length($prm[1])-3);
+        next;
+      }
+      if ( $_ =~ /Patches\\NetBackup\]/ ) { 
+        $section = "Patches"; 
+        next;
+      }
+      if ( $_ =~ /Veritas\\Symantec\]/ ) { 
+        $section = ""; 
+        next;
+      }
+      if ( $_ =~ /NetBackup for Lotus Notes/ ) { 
+        $section = ""; 
+        next;
+      }
+      if ( ($_ =~ /PatchName/) && ($section eq "Patches" ) ) { 
+        @prm = split(/=/,$_) ;
+        $patchName = substr($prm[1],1,length($prm[1])-3);
+        next;
+      }
+      if ( ($_ =~ /LiveUpdateSeqNum/) && ($section eq "Patches" ) ) { 
+        @prm = split(/=/,$_) ;
+        $liveUpdateSeqNum = substr($prm[1],1,length($prm[1])-3);
+        if ( $liveUpdateSeqNum > $maxSeq ) {
+          $maxSeq = $liveUpdateSeqNum;
+          $lastPatch = $patchName;
+        }
+        next;
+      }
     }
+    close REGKEY;
   }
-  close REGKEY;
 }
 
 $lastPatch =~ s/Veritas NetBackup //;
@@ -316,6 +356,14 @@ else {
 }
 
 $machine = lc($machine);
+
+my $linein = '';
+my $instance = '';
+my $currSection = "";
+my $autostart = "NO";
+my $dbalias = "";
+my $recordListed = "No";
+my @appConns = ();
 
 while (<INSTPIPE>) {
     if ( $_ =~ /Instance Error encountered/) { next; } # skip this message ....
@@ -593,4 +641,5 @@ while (<INSTPIPE>) {
     }
     # print "Finished with Instance $instance\n";
 }
+
 

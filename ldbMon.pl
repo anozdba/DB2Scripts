@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ldbMon.pl
 #
-# $Id: ldbMon.pl,v 1.5 2018/06/19 23:29:58 db2admin Exp db2admin $
+# $Id: ldbMon.pl,v 1.8 2019/05/07 04:58:05 db2admin Exp db2admin $
 #
 # Description:
 # Script to list out the db snap information
@@ -14,6 +14,15 @@
 #
 # ChangeLog:
 # $Log: ldbMon.pl,v $
+# Revision 1.8  2019/05/07 04:58:05  db2admin
+# use DB2DBDFT as the default database value
+#
+# Revision 1.7  2019/01/25 04:08:18  db2admin
+# correct bug with previous change where replace done incorrectly
+#
+# Revision 1.6  2019/01/25 03:12:40  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.5  2018/06/19 23:29:58  db2admin
 # correct help information
 #
@@ -66,7 +75,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel timeDiff);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel timeDiff);
 
 # -------------------------------------------------------------------
 
@@ -158,7 +167,7 @@ my %diffKeywords = (
     'Catalog cache inserts' =>  1
 );
 
-my $ID = '$Id: ldbMon.pl,v 1.5 2018/06/19 23:29:58 db2admin Exp db2admin $';
+my $ID = '$Id: ldbMon.pl,v 1.8 2019/05/07 04:58:05 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -337,6 +346,7 @@ sub usage {
        -d              : database to query
        -w              : wait time between iterations (defaults to 60 seconds)
        -n              : number of iterations - default 1
+       -x              : exclude all static values
        -c              : show change from pevious iterations
        -C              : show change from first iteration
        -l              : Output database load records to STDERR
@@ -350,11 +360,12 @@ sub usage {
 }
 
 my $headingPrinted = 0;
-my $silent = "No";
+my $silent = 0;
 my $database = '';
 my $changes = 0;  # 1 => from last time, 2 => from beginning
 my $inFile = '';
 my $loadFile = 0;
+my $onlyShowChangedValues = 0;
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
@@ -362,7 +373,7 @@ my $loadFile = 0;
 
 # Initialise vars for getOpt ....
 
-while ( getOpt(":?hsvcCn:w:d:f:l") ) {
+while ( getOpt(":?hsvxcCn:w:d:f:l") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
@@ -371,19 +382,25 @@ while ( getOpt(":?hsvcCn:w:d:f:l") ) {
    $silent = "Yes";
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Databse $getOpt_optValue will be checked\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "l"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data load records will be generated\n";
    }
    $loadFile = 1;
  }
+ elsif (($getOpt_optName eq "x"))  {
+   if ( ! $silent ) {
+     print "Only show changed values\n";
+   }
+   $onlyShowChangedValues = 1;
+ }
  elsif (($getOpt_optName eq "f"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "File $getOpt_optValue will be used rather than a realtime snapshot\n";
    }
    $inFile = $getOpt_optValue;
@@ -395,7 +412,7 @@ while ( getOpt(":?hsvcCn:w:d:f:l") ) {
       usage ("Value supplied for the wait parameter (-w) is not numeric");
       exit;
    }
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Monitor will wait $wait seconds before iteration\n";
    }
    $waitMS = $wait * 1000;
@@ -407,25 +424,25 @@ while ( getOpt(":?hsvcCn:w:d:f:l") ) {
       usage ("Value supplied for number parameter (-n) is not numeric");
       exit;
    }
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Monitor will iterate $number times\n";
    }
  }
  elsif (($getOpt_optName eq "c"))  {
    $changes = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data changes from last entry will be displayed\n";
    }
  }
  elsif (($getOpt_optName eq "C"))  {
    $changes = 2;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data changes from first entry will be displayed\n";
    }
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Debug Level set to $debugLevel\n";
    }
  }
@@ -451,9 +468,18 @@ my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
 my $NowTS = "$year.$month.$day $hour:$minute:$second";
 my $TS;
 
-if ( ($database eq '') ) {
-  usage ("Database parameter must be entered");
-  exit;
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
 # Load up the historic values
@@ -463,6 +489,7 @@ print "Loading old comparison values\n";
 my @oldSnap_values = ();
 my %hist_values = ();
 my $DBNAME = '';
+my $entryChanged = 0;
 if ( open(OLDSNAP,"<ldbmon.hist") ) {
   while (<OLDSNAP>) {
     chomp $_;
@@ -621,7 +648,8 @@ sub processDBSNAP {
   }  
   # process the gathered data
 
-  foreach my $tmp (sort by_key keys %rep_values) {      # process each of the reatined keyword values
+  foreach my $tmp (sort by_key keys %rep_values) {      # process each of the retained keyword values
+    $entryChanged = 0;
     if ( trim($tmp) ne '' ) {
       if ( ! defined ($retainedKeywords{$tmp}) ) { next; }  # only process the values that are retained
 
@@ -636,6 +664,7 @@ sub processDBSNAP {
             if ( $first  && ( ! defined($hld_values{$tmp})) ) { # no previous values
               displayDebug("Diff value just assigned reporting value: $rep_values{$tmp}",1,$currentSubroutine);
               $diff_values{$tmp} = $rep_values{$tmp};
+              $entryChanged = 1;
             }
             else {
               $diff_values{$tmp} = $rep_values{$tmp} - $hld_values{$tmp};
@@ -643,31 +672,39 @@ sub processDBSNAP {
           }
           else { # just show the current value (diff makes no sense)
             $diff_values{$tmp} = $rep_values{$tmp};
+            if ( $diff_values{$tmp} ne $rep_values{$tmp} ) { $entryChanged = 1; }
           }
         }
         else { # if it's not numeric just show the current value
           $diff_values{$tmp} = $rep_values{$tmp};
+          if ( $diff_values{$tmp} ne $rep_values{$tmp} ) { $entryChanged = 1; }
         }
       }
 
       if ( $first && ( ! defined($hld_values{$tmp})) ) {   # dont use the difference
-        print "        >> $tmp => $rep_values{$tmp}\n";
+        if ( ( ! $onlyShowChangedValues ) || ( $entryChanged ) ) { 
+          print "        >> $tmp => $rep_values{$tmp}\n";
+        }
       }
       else { # There are historic values to compare against
         if ( defined($diffKeywords{$tmp}) ) { # value should be subtracted to identify change
-          if ( $changes == 0 ) { # dont do differences
-            print "      >> $tmp => $diff_values{$tmp} ($hld_values{$tmp})\n";
-          }
-          elsif ( $changes == 1) { # difference to last iteration 
-            print "Delta >> $tmp => $diff_values{$tmp} ($hld_values{$tmp})\n";
-          }
-          else { # difference to first iteration 
-            print "Delta >> $tmp => $diff_values{$tmp} ($hld_values{$tmp})\n";
+          if ( ( ! $onlyShowChangedValues ) || ( $entryChanged ) ) { # check what we are printing
+            if ( $changes == 0 ) { # dont do differences
+              print "      >> $tmp => $diff_values{$tmp} ($hld_values{$tmp})\n";
+            }
+            elsif ( $changes == 1) { # difference to last iteration 
+              print "Delta >> $tmp => $diff_values{$tmp} ($hld_values{$tmp})\n";
+            }
+            else { # difference to first iteration 
+              print "Delta >> $tmp => $diff_values{$tmp} ($hld_values{$tmp})\n";
+            }
           }
         }
         else { # just display the returned value
           if ( $diff_values{$tmp} eq $hld_values{$tmp} ) { # the current and last values are the same
-            print "      >> $tmp => $diff_values{$tmp}\n";
+            if ( ! $onlyShowChangedValues ) {
+              print "      >> $tmp => $diff_values{$tmp}\n";
+            }
           }
           else {
             print "      >> $tmp => $diff_values{$tmp} [changed from $hld_values{$tmp}]\n";

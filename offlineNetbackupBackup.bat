@@ -207,9 +207,9 @@ if %DO_UNQSCE_FLAG% == 0 goto emailchk
 :emailchk
 if NOT %SEND_EMAIL% == 0 (
   if "%DB%" EQU "" (
-    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Offline Backup of UNKNOWN failed" mpl_it_dba_udb@KAGJCM.com.au NONE "results from the offline backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
+    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Offline Backup of UNKNOWN failed" DEFAULT_EMAIL@KAGJCM.com.au NONE "results from the offline backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
   ) ELSE (
-    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Offline Backup of %DB% failed" mpl_it_dba_udb@KAGJCM.com.au NONE "results from the offline backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
+    cscript.exe c:\udbdba\scripts\sendEmail.vbs "%machine% - Offline Backup of %DB% failed" DEFAULT_EMAIL@KAGJCM.com.au NONE "results from the offline backup of %machine% / %DB2INSTANCE% / %DB% :" %OUTPUT_FILE%  %OUTPUT_LOG%
   )
 )
 

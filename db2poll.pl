@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # db2poll.pl
 #
-# $Id: db2poll.pl,v 1.48 2018/10/21 21:01:47 db2admin Exp db2admin $
+# $Id: db2poll.pl,v 1.50 2019/02/07 04:18:52 db2admin Exp db2admin $
 #
 # Description:
 # Loops through a selection of databases determined through parameters and connect to each.
@@ -11,6 +11,12 @@
 #
 # ChangeLog:
 # $Log: db2poll.pl,v $
+# Revision 1.50  2019/02/07 04:18:52  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.49  2019/01/29 00:04:12  db2admin
+# change the parameter names referenced in commonFunctions.pm
+#
 # Revision 1.48  2018/10/21 21:01:47  db2admin
 # correct issue with script when run from windows (initialisation of run directory)
 #
@@ -159,7 +165,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: db2poll.pl,v 1.48 2018/10/21 21:01:47 db2admin Exp db2admin $';
+my $ID = '$Id: db2poll.pl,v 1.50 2019/02/07 04:18:52 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -209,7 +215,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub isError {
   # Check to see if the error means that there is a database problem

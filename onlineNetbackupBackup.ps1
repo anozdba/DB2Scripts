@@ -1,46 +1,49 @@
 # --------------------------------------------------------------------
-# onlineDiskBackup.ps1
+# onlineNetbackupBackup.ps1
 #
-# $Id: onlineDiskBackup.ps1,v 1.3 2018/09/25 03:53:37 db2admin Exp db2admin $
+# $Id: onlineNetbackupBackup.ps1,v 1.6 2018/10/21 20:38:42 db2admin Exp db2admin $
 #
 # Description:
-# Script to do an online backup of an indicated database to disk
+# Script to do an online backup of an indicated database
 #
 # Usage:
-#   onlineDiskBackup.ps1 -instance=esbin1p -database=test2 -options="session=4" -Directory="d:\backups"
-#
-#   or from within Task scheduler
-#
-#   powershell.exe -ExecutionPolicy Bypass c:\udbdba\scripts\onlineDiskBackup.ps1 -database migrdev -Direc d:\backups -compress
+#   onlineNetbackupBackup.ps1 -instance=esbin1p -database=test2 -options="session=4"
 #
 # $Name:  $
 #
 # ChangeLog:
-# $Log: onlineDiskBackup.ps1,v $
-# Revision 1.3  2018/09/25 03:53:37  db2admin
-# adjust location of parameter standardisation code
-# change instance default to the env variable value
+# $Log: onlineNetbackupBackup.ps1,v $
+# Revision 1.6  2018/10/21 20:38:42  db2admin
+# correct bug with the way the timesatmps were generated
 #
-# Revision 1.2  2018/09/25 01:47:19  db2admin
-# enforce consistent case
+# Revision 1.5  2018/09/06 05:59:32  db2admin
+# change the status delimiter
 #
-# Revision 1.1  2018/09/25 00:57:27  db2admin
+# Revision 1.4  2018/08/21 05:27:22  db2admin
+# add in script name to the status record
+#
+# Revision 1.3  2018/08/20 00:03:58  db2admin
+# add in code to send back status information to 192.168.1.1 during the execution of the backup
+#
+# Revision 1.2  2017/12/29 00:26:44  db2admin
+# add in options to:
+# 1. include logs explicitly
+# 2. exclude logs
+# 3. input a target email address for failure messages
+#
+# Revision 1.1  2017/08/01 00:13:59  db2admin
 # Initial revision
-#
 #
 # --------------------------------------------------------------------
 
 # parameters
 
 param(
-  [string]$uniqueFile = "onlineDiskBackup" ,
-  [string]$instance = $env:DB2INSTANCE ,
+  [string]$uniqueFile = "onlineNetbackupBackup" ,
+  [string]$instance = "db2" ,
+  [string]$load = "C:\Progra~1\VERITAS\NetBackup\bin\nbdb2.dll" ,
   [string]$email = 'DEFAULT_EMAIL@KAGJCM.com.au' , 
   [string]$database = "" ,
-  [string]$Directory = 'd:\backups',
-  [switch]$Incremental = $false,
-  [switch]$Delta = $false,
-  [switch]$compress = $false,
   [string]$options = "" ,
   [switch]$IncludeLogs = $false ,
   [switch]$ExcludeLogs = $false ,
@@ -52,44 +55,38 @@ if ( $database -eq "" ) {
   return
 }
 
-$hostname = $env:computername
-
-# adjust case as necessary
-$database = $database.ToUpper()
-$instance = $instance.ToLower()
-$hostname = $hostname.ToLower()
-
 # logging 
 
+$hostname = $env:computername
 $statusfile = "$env:TEMP\backup_status_${hostname}_${instance}_${database}" 
 $STATUS = "Started"
 $MSG = ""
 $BACKUPCMD = ""
 
-If (Test-Path logs\onlineDiskBackup_${hostname}_${instance}_$database.log){
-	Remove-Item logs\onlineDiskBackup_${hostname}_${instance}_$database.log
+If (Test-Path logs\onlineNetbackupBackup_${hostname}_${instance}_$database.log){
+	Remove-Item logs\onlineNetbackupBackup_${hostname}_${instance}_$database.log
 }
 
 $ErrorActionPreference="SilentlyContinue"
 Stop-Transcript | out-null
 $ErrorActionPreference = "Continue"
-Start-Transcript -path logs\onlineDiskBackup_${hostname}_${instance}_$database.log -append
+Start-Transcript -path logs\onlineNetbackupBackup_${hostname}_${instance}_$database.log -append
 
 # put in fix for early version of powershell
 
 If ($PSVersionTable.PSVersion.Major -le 2) {
   # put in fix for STDOUT redirection
-  $bindingFlags = [Reflection.BindingFlags] "Instance,NonPublic,GetField"
-  $objectRef = $host.GetType().GetField("externalHostRef", $bindingFlags).GetValue($host)
+  $bindingFlags = [Reflection.BindingFlags] “Instance,NonPublic,GetField”
+  $objectRef = $host.GetType().GetField(“externalHostRef”, $bindingFlags).GetValue($host)
 
-  $bindingFlags = [Reflection.BindingFlags] "Instance,NonPublic,GetProperty"
-  $consoleHost = $objectRef.GetType().GetProperty("Value", $bindingFlags).GetValue($objectRef, @())
+  $bindingFlags = [Reflection.BindingFlags] “Instance,NonPublic,GetProperty”
+  $consoleHost = $objectRef.GetType().GetProperty(“Value”, $bindingFlags).GetValue($objectRef, @())
 
-  [void] $consoleHost.GetType().GetProperty("IsStandardOutputRedirected", $bindingFlags).GetValue($consoleHost, @())
-  $bindingFlags = [Reflection.BindingFlags] "Instance,NonPublic,GetField"
-  $field = $consoleHost.GetType().GetField("standardOutputWriter", $bindingFlags)
+  [void] $consoleHost.GetType().GetProperty(“IsStandardOutputRedirected”, $bindingFlags).GetValue($consoleHost, @())
+  $bindingFlags = [Reflection.BindingFlags] “Instance,NonPublic,GetField”
+  $field = $consoleHost.GetType().GetField(“standardOutputWriter”, $bindingFlags)
   $field.SetValue($consoleHost, [Console]::Out)
-  $field2 = $consoleHost.GetType().GetField("standardErrorWriter", $bindingFlags)
+  $field2 = $consoleHost.GetType().GetField(“standardErrorWriter”, $bindingFlags)
   $field2.SetValue($consoleHost, [Console]::Out)
   write-output "STDOUT work around implemented for Powershell V2"
 }
@@ -102,19 +99,6 @@ $env:DB2INSTANCE=$instance
 
 if ( $IncludeLogs ) {
   $inclParm = "include logs"
-}
-
-$compressAction = ''
-if ( $compress ) {
-  $compressAction = "compress"
-}
-
-if ( $Incremental ) {
-  $backupType = "incremental"
-}
-
-if ( $Delta ) {
-  $backupType = "incremental delta"
 }
 
 if ( $ExcludeLogs ) {
@@ -135,29 +119,25 @@ if ( $help ) {
   write-output "  Instance        : $instance"
   write-output "  Database        : $database"
   write-output "  Options         : $options"
-  write-output "  Directory       : $Directory"
-  write-output "  Backup Type     : $backupType"
+  write-output "  Netbackup Module: $load"
   write-output "  Email           : $email"
   write-output "  Include Logs    : $IncludeLogs"
   write-output "  Exclude Logs    : $ExcludeLogs"
   write-output ""
   write-output "Command invocation format is:"
   write-output ""
-  write-output "  onlineDiskBackup.ps1 [-IncludeLogs] [-ExcludeLogs] [-Incremental] [-Delta] [-instance <instance>] -database <database> [-options <options>] [-Directory <backup target directory>] [-email <email address>] [-help] "
+  write-output "  gatherDBSummary.ps1 [-IncludeLogs] [-ExcludeLogs] [-instance <age limit>] -database <database> [-options <options>] [-load <netbackup load module>] [-email <email address>] [-help] "
   write-output ""
   write-output "      instance           - Instance to use (Default: db2)"
   write-output "      database           - comma delimited list of databases to retrieve data from"
   write-output "      options            - database backup options to be passed netbackup"
-  write-output "      Directory          - Backup target directory (default: d:\backups)"
-  write-output "      Incremental        - Incremental Backup"
-  write-output "      Delta              - Incremental Delta Backup"
+  write-output "      load               - Netbackup load module (default: C:\Progra~1\VERITAS\NetBackup\bin\nbdb2.dll)"
   write-output "      IncludeLogs        - explicitly include logs in backup"
   write-output "      ExcludeLogs        - exclude logs from backup"
   write-output "      Email to send MSG  - $email"
   write-output "      help               - This message"
   write-output ""
   write-output "      Note: Exclude logs will take precendence over the include logs parameter if both are specified"
-  write-output "            Incremental Delta will take precedence over Incremental if both are specified"
   write-output ""
   return
 }
@@ -166,15 +146,15 @@ write-output "$ts Starting $scriptName"
 
 $send_email = $false
 
-write-output "Backing up $database to $Directory using the following options: $options"
+write-output "Backing up $database to Netbackup using the following options: $options"
 
 # start the process
 
 write-output ">>>>>> Processing database $database"
 
 # write the status record
-$STARTED = Get-Date -format yyyy-MM-dd-hh:mm:ss
-write-output "DB2#$STARTED#$STARTED#$hostname#$instance#$database#ONLINE#$STATUS#onlineDiskBackup.ps1#$BACKUPCMD#" | Out-File $statusfile -encoding ascii
+$STARTED = Get-Date -format 'yyyy-MM-dd hh:mm:ss'
+write-output "DB2#$STARTED#$STARTED#$hostname#$instance#$database#ONLINE#$STATUS#onlineNetbackupBackup.ps1#$BACKUPCMD#" | Out-File $statusfile -encoding ascii
 start-process pscp.exe "-i Putty\Keys\WindowsSCPPrivateKey.ppk $statusfile db2admin@192.168.1.1:realtimeBackupStatus " -wait -nonewwindow -RedirectStandardOutput c:\temp\$uniqueFile_$hostname.PSCP
 get-content c:\temp\$uniqueFile_$hostname.PSCP | write-output
 
@@ -191,18 +171,18 @@ if ( $proc.ExitCode -ne 0 ) {
   $send_email = $true
 }
 else {
-  $BACKUPCMD = "backup database $database online $backupType to '$Directory' $options $compressAction $inclParm"
+  $BACKUPCMD = "backup database $database online load $load $options $inclParm"
   # write the status record
-  $CTIME = Get-Date -format yyyy-MM-dd-hh:mm:ss
-  write-output "DB2#$STARTED#$CTIME#$hostname#$instance#$database#ONLINE#$STATUS#onlineDiskBackup.ps1#$BACKUPCMD#$MSG" | Out-File  $statusfile -encoding ascii
+  $CTIME = Get-Date -format 'yyyy-MM-dd hh:mm:ss'
+  write-output "DB2#$STARTED#$CTIME#$hostname#$instance#$database#ONLINE#$STATUS#onlineNetbackupBackup.ps1#$BACKUPCMD#$MSG" | Out-File  $statusfile -encoding ascii
   start-process pscp.exe "-i Putty\Keys\WindowsSCPPrivateKey.ppk $statusfile db2admin@192.168.1.1:realtimeBackupStatus " -wait -nonewwindow -RedirectStandardOutput c:\temp\$uniqueFile_$hostname.PSCP
   get-content c:\temp\$uniqueFile_$hostname.PSCP | write-output
 
   $ts = Get-Date -format yyyy-MM-dd-hh:mm
   write-output "$ts Connect successful"
   write-output "$ts Backup being issued"
-  write-output "$ts Backup command used: $BACKUPCMD"
-  $proc = Start-Process db2 "$BACKUPCMD " -wait -nonewwindow -Passthru -RedirectStandardOutput c:\temp\${uniqueFile}_${hostname}_${instance}_$database.temp
+  write-output "$ts Backup command used: backup database $database online load $load $options $inclParm"
+  $proc = Start-Process db2 "backup database $database online load $load $options $inclParm " -wait -nonewwindow -Passthru -RedirectStandardOutput c:\temp\${uniqueFile}_${hostname}_${instance}_$database.temp
   get-content c:\temp\${uniqueFile}_${hostname}_${instance}_$database.temp | write-output
 
   if ( $proc.ExitCode -ne 0 ) { # non-zero return from backup
@@ -232,8 +212,8 @@ $ts = Get-Date -format yyyy-MM-dd-hh:mm
 write-output "$ts Finished $scriptName"
 
 # write the status record
-$CTIME = Get-Date -format yyyy-MM-dd-hh:mm:ss
-write-output "DB2#$STARTED#$CTIME#$hostname#$instance#$database#ONLINE#$STATUS#onlineDiskBackup.ps1#$BACKUPCMD#$MSG" | Out-File $statusfile -encoding ascii
+$CTIME = Get-Date -format 'yyyy-MM-dd hh:mm:ss'
+write-output "DB2#$STARTED#$CTIME#$hostname#$instance#$database#ONLINE#$STATUS#onlineNetbackupBackup.ps1#$BACKUPCMD#$MSG" | Out-File $statusfile -encoding ascii
 start-process pscp.exe "-i Putty\Keys\WindowsSCPPrivateKey.ppk $statusfile db2admin@192.168.1.1:realtimeBackupStatus " -wait -nonewwindow -RedirectStandardOutput c:\temp\$uniqueFile_$hostname.PSCP
 get-content c:\temp\$uniqueFile_$hostname.PSCP | write-output
 
@@ -249,10 +229,9 @@ if ( $send_email ) { # something bad happened
 
   $body = get-content "c:\temp\$uniqueFile_$hostname.mailBody" | Out-String
 
-  Send-MailMessage -To "$email" -From "do_not_reply@KAGJCM.com.au" -Subject "$hostname - Online Backup of $database failed" -SmtpServer smtp.KAGJCM.local -Body $body -Attachments "logs\onlineDiskBackup_${hostname}_${instance}_$database.log" 
+  Send-MailMessage -To "$email" -From "do_not_reply@KAGJCM.com.au" -Subject "$hostname - Online Backup of $database failed" -SmtpServer smtp.KAGJCM.local -Body $body -Attachments "logs\onlineNetbackupBackup_${hostname}_${instance}_$database.log" 
 }
 else  {
   Stop-Transcript
 }
-
 

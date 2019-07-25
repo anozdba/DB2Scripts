@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ltssnap.pl
 #
-# $Id: ltssnap.pl,v 1.5 2016/07/11 05:10:38 db2admin Exp db2admin $
+# $Id: ltssnap.pl,v 1.9 2019/05/14 00:53:26 db2admin Exp db2admin $
 #
 # Description:
 # Script to list out the tablespacespace snap information
@@ -14,6 +14,18 @@
 #
 # ChangeLog:
 # $Log: ltssnap.pl,v $
+# Revision 1.9  2019/05/14 00:53:26  db2admin
+# correct help output description
+#
+# Revision 1.8  2019/05/13 02:10:21  db2admin
+# correct initialisation of variable
+#
+# Revision 1.7  2019/05/07 05:46:35  db2admin
+# use DB2DBDFT variable to supply database name
+#
+# Revision 1.6  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.5  2016/07/11 05:10:38  db2admin
 # clear data if requested to
 #
@@ -61,7 +73,7 @@ BEGIN {
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel);
+use commonFunctions qw(getOpt myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel);
 
 # -------------------------------------------------------------------
 
@@ -106,7 +118,7 @@ my %retainedKeywords = (
     'Total elapsed asynchronous write time' =>  1
 );
 
-my $ID = '$Id: ltssnap.pl,v 1.5 2016/07/11 05:10:38 db2admin Exp db2admin $';
+my $ID = '$Id: ltssnap.pl,v 1.9 2019/05/14 00:53:26 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -126,13 +138,13 @@ sub usage {
 
   print "Usage: $0 -?hs -d <database> [-v[v]] i[-c] [-C] [-z] [-t <tablespace>] [-p]
 
-       Script to identify lock realtionships as displayed by db2pd
+       Script to list out the tablespacespace snap information
 
        Version $Version Last Changed on $Changed (UTC)
 
        -h or -?        : This help message
        -s              : Silent mode (in this program only suppesses parameter messages)
-       -d              : database to query
+       -d              : database to query [DB2DBDFT supplies the default value of the database]
        -c              : delta values are cummulative from first run
        -C              : start accumulating again
        -p              : show previous values
@@ -149,7 +161,7 @@ sub usage {
 }
 
 
-my $silent = "No";
+my $silent = 0;
 my $debugLevel = 0;
 my $cummulative = 0;
 my $clear = 0;
@@ -170,47 +182,47 @@ while ( getOpt(":?hsvcCzpd:t:") ) {
    exit;
  }
  elsif (($getOpt_optName eq "s"))  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Databse $getOpt_optValue will be checked\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "t"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Tablespace $getOpt_optValue will be listed\n";
    }
    $tablespace = uc($getOpt_optValue);
  }
  elsif (($getOpt_optName eq "c"))  {
    $cummulative = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data will be accumulated\n";
    }
  }
  elsif (($getOpt_optName eq "p"))  {
    $showPrevious = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Historical data will be displayed\n";
    }
  }
  elsif (($getOpt_optName eq "C"))  {
    $clear = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Historic data will be cleared\n";
    }
  }
  elsif (($getOpt_optName eq "z"))  {
    $onlyChanged = 1;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only changed data will be displayed\n";
    }
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Debug Level set to $debugLevel\n";
    }
  }
@@ -235,9 +247,18 @@ $month = substr("0" . $month, length($month)-1,2);
 my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
 my $NowTS = "$year.$month.$day $hour:$minute:$second";
 
-if ( ($database eq '') ) {
-  usage ("Database parameter must be entered");
-  exit;
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
 print "Application Snapshot Summary ($NowTS) .... \n\n";

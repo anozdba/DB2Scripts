@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # ldbcfg.pl
 #
-# $Id: ldbcfg.pl,v 1.16 2018/10/17 00:58:51 db2admin Exp db2admin $
+# $Id: ldbcfg.pl,v 1.21 2019/06/18 04:38:15 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a GET DB CFG command
@@ -14,6 +14,22 @@
 #
 # ChangeLog:
 # $Log: ldbcfg.pl,v $
+# Revision 1.21  2019/06/18 04:38:15  db2admin
+# 1. standardise the silent parameter
+# 2. add in a default dataabse name if available
+#
+# Revision 1.20  2019/06/17 00:03:25  db2admin
+# correct allocation of script directory in windows
+#
+# Revision 1.19  2019/02/07 04:18:55  db2admin
+# remove timeAdd from the use list as the module is no longer provided
+#
+# Revision 1.18  2019/01/25 03:12:41  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
+# Revision 1.17  2018/11/23 00:52:17  db2admin
+# correct the setting of the script directory
+#
 # Revision 1.16  2018/10/17 00:58:51  db2admin
 # convert from commonFunction.pl to commonFunctions.pm
 #
@@ -66,7 +82,7 @@
 #
 # --------------------------------------------------------------------
 
-my $ID = '$Id: ldbcfg.pl,v 1.16 2018/10/17 00:58:51 db2admin Exp db2admin $';
+my $ID = '$Id: ldbcfg.pl,v 1.21 2019/06/18 04:38:15 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -91,6 +107,9 @@ BEGIN {
     $scriptDir = 'c:\udbdba\scrxipts';
     $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }    
     $dirSep = '\\';
     $tempDir = 'c:\temp\\';
   }
@@ -100,6 +119,10 @@ BEGIN {
     @mach_info = split(/\s+/,$machine_info);
     $OS = $mach_info[0] . " " . $mach_info[2];
     $scriptDir = "scripts";
+    $tmp = rindex($0,'/');
+    if ($tmp > -1) {
+      $scriptDir = substr($0,0,$tmp+1)  ;
+    }
     $logDir = `cd; pwd`;
     chomp $logDir;
     $logDir .= '/logs/';
@@ -108,7 +131,7 @@ BEGIN {
   }
 }
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -146,7 +169,7 @@ sub usage {
 
 # Set default values for variables
 
-$silent = "No";
+$silent = 0;
 $genData = "No";
 $printRep = "Yes";
 $PARMName = "All";
@@ -177,72 +200,72 @@ while ( getOpt($getOpt_opt) ) {
    exit;
  }
  elsif (($getOpt_optName eq "s") )  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Database $getOpt_optValue will be listed\n";
    }
    $database = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Debug level set to $debugLevel\n";
    }
  }
  elsif (($getOpt_optName eq "D"))  {
    $showDetail = "Yes";
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Detail will be shown\n";
    }
  }
  elsif (($getOpt_optName eq "x"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only entries containing different comparison values will be displayed\n";
    }
    $onlyDiff = "Yes";
  }
  elsif (($getOpt_optName eq "X"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "The update commands will use the values from the file\n";
    }
    $useFile = "Yes";
    $onlyDiff = "Yes";
  }
  elsif (($getOpt_optName eq "f"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Comparison file will be $getOpt_optValue\n";
    }
    $compFile = $getOpt_optValue;
  }
  elsif (($getOpt_optName eq "S"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Dir commands will be generated\n";
    }
    $dirCmds = "Yes";
  }
  elsif (($getOpt_optName eq "p"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only entries containing $getOpt_optValue will be displayed\n";
    }
    $PARMName = uc($getOpt_optValue);
  }
  elsif (($getOpt_optName eq "V"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Entries containing $getOpt_optValue anywhere will be displayed\n";
    }
    $search = uc($getOpt_optValue);
  }
  elsif (($getOpt_optName eq "o") || ($getOpt_optName eq "ONLY") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only the created definitions will be output\n";
    }
    $genData = "Yes";
    $printRep = "No";
  }
  elsif (($getOpt_optName eq "g") || ($getOpt_optName eq "GENDATA") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Update configuration definitions will be generated\n";
    }
    $genData = "Yes";
@@ -253,13 +276,13 @@ while ( getOpt($getOpt_opt) ) {
  }
  else { # handle other entered values ....
    if ( $database eq "") {
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "Database $getOpt_optValue will be listed\n";
      }
      $database = $getOpt_optValue;
    }
    elsif ( $PARMName eq "All") {
-     if ( $silent ne "Yes") {
+     if ( ! $silent ) {
        print "Only entries containing $getOpt_optValue will be displayed\n";
      }
      $PARMName = uc($getOpt_optValue);
@@ -291,11 +314,21 @@ $NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
 $NowTS = "$year-$month-$day-$hour.$minute.$second";
 $YYYYMMDD = "$year$month$day";
 
-if ( $database eq "" ) {
-  die "Database name MUST be entered\n";
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
-if ($silent ne "Yes") {
+if (! $silent ) {
   if ($PARMName eq "All") {
     print "All parameters will be displayed for database $database\n";
   }

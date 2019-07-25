@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lbackup.pl
 #
-# $Id: lbackup.pl,v 1.18 2018/03/14 02:37:19 db2admin Exp db2admin $
+# $Id: lbackup.pl,v 1.22 2019/06/25 05:48:14 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST BACKUP ALL FOR <db> command
@@ -14,6 +14,19 @@
 #
 # ChangeLog:
 # $Log: lbackup.pl,v $
+# Revision 1.22  2019/06/25 05:48:14  db2admin
+# 1. implment use script
+# 2. add in -f parameter to handle an input file of a report
+#
+# Revision 1.21  2019/05/07 04:04:03  db2admin
+# add in use of DB2DBDFT as the default database
+#
+# Revision 1.20  2019/01/25 04:08:18  db2admin
+# correct bug with previous change where replace done incorrectly
+#
+# Revision 1.19  2019/01/25 03:12:40  db2admin
+# adjust commonFunctions.pm parameter importing to match module definition
+#
 # Revision 1.18  2018/03/14 02:37:19  db2admin
 # add in error message for SQL2155W
 #
@@ -74,22 +87,32 @@
 #
 # --------------------------------------------------------------------
 
-my $machine;            # machine name
-my $machine_info;       # ** UNIX ONLY ** uname
-my @mach_info;          # ** UNIX ONLY ** uname split by spaces
-my $OS;                 # OS
-my $scriptDir;          # directory where the script is running
-my $tmp;
+use strict;
+
+my $currentRoutine = 'Main';
+my $machine;   # machine we are running on 
+my $OS;        # OS running on
+my $scriptDir; # directory the script ois running out of
+my $tmp ;
+my @tmp ;
+my $machine_info;
+my @mach_info;
+my $logDir;
+my $dirSep;
+my $tempDir;
 
 BEGIN {
   if ( $^O eq "MSWin32") {
     $machine = `hostname`;
     $OS = "Windows";
-    $scriptDir = 'c:\udbdba\scrxipts';
+    $scriptDir = 'c:\udbdba\scripts';
+    $logDir = 'logs\\';
     $tmp = rindex($0,'\\');
     if ($tmp > -1) {
       $scriptDir = substr($0,0,$tmp+1)  ;
     }
+    $dirSep = '\\';
+    $tempDir = 'c:\temp\\';
   }
   else {
     $machine = `uname -n`;
@@ -101,17 +124,22 @@ BEGIN {
     if ($tmp > -1) {
       $scriptDir = substr($0,0,$tmp+1)  ;
     }
+    $logDir = `cd; pwd`;
+    chomp $logDir;
+    $logDir .= '/logs/';
+    $dirSep = '/';
+    $tempDir = '/var/tmp/';
   }
 }
 
 use lib "$scriptDir";
 
-use commonFunctions qw(getOpt ltrim myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $myDate_debugLevel displayMinutes timeDiff);
+use commonFunctions qw(getOpt ltrim myDate trim $getOpt_optName $getOpt_optValue @myDate_ReturnDesc $cF_debugLevel displayMinutes timeDiff);
 
-$ID = '$Id: lbackup.pl,v 1.18 2018/03/14 02:37:19 db2admin Exp db2admin $';
-@V = split(/ /,$ID);
-$Version=$V[2];
-$Changed="$V[3] $V[4]";
+my $ID = '$Id: lbackup.pl,v 1.22 2019/06/25 05:48:14 db2admin Exp db2admin $';
+my @V = split(/ /,$ID);
+my $Version=$V[2];
+my $Changed="$V[3] $V[4]";
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -120,14 +148,15 @@ sub usage {
     }
   }
 
-  print "Usage: $0 -?hsDOR [DATA | DATAONLY] -d <database> [-v[v]]
+  print "Usage: $0 -?hsDOR [DATA | DATAONLY] -d <database> [-f <filename>] [-v[v]]
 
        Version $Version Last Changed on $Changed (UTC)
 
        -h or -?        : This help message
        -s              : Silent mode (dont produce the report)
        -o or -O        : Only print out the data - dont print out a report
-       -d              : Database to be listed
+       -f              : file name to read the output of a 'list backup all for <database>' command
+       -d              : Database to be listed [defaults to DB2DBDFT variable]
        -D              : Generate the data in a comma delimited form for loading into a table
        -r or -R        : Generate the report
        -v              : set debug level
@@ -139,11 +168,13 @@ sub usage {
 
 # Set default values for variables
 
-$silent = "No";
-$database = "";
-$genData = "";
-$printRep = "Yes";
-$debugLevel = 0;
+my $silent = 0;
+my $database = "";
+my $genData = "";
+my $printRep = "Yes";
+my $debugLevel = 0;
+my $inFile = '';
+my $i;
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
@@ -151,47 +182,47 @@ $debugLevel = 0;
 
 # Initialise vars for getOpt ....
 
-$getOpt_prm = 0;
-$getOpt_opt = ":?hsrRoODd:|^DATA|^DATAONLY";
-
-$getOpt_optName = "";
-$getOpt_optValue = "";
-
-while ( getOpt($getOpt_opt) ) {
+while ( getOpt(":?hsrRoODf:d:|^DATA|^DATAONLY") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
  }
  elsif (($getOpt_optName eq "s"))  {
-   $silent = "Yes";
+   $silent = 1;
  }
  elsif ((uc($getOpt_optName) eq "O") || ($getOpt_optName eq "DATAONLY") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Only the data will be output\n";
    }
    $genData = "Yes";
    $printRep = "No";
  }
  elsif (($getOpt_optName eq "D")  || ($getOpt_optName eq "DATA") )  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Data will be generated in a comma delimited form\n";
    }
    $genData = "Yes";
  }
  elsif (($getOpt_optName eq "v"))  {
    $debugLevel++;
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "debug level now set to $debugLevel\n";
    }
  }
  elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "Database $getOpt_optValue will be listed\n";
    }
    $database = $getOpt_optValue;
  }
+ elsif (($getOpt_optName eq "f"))  {
+   $inFile = $getOpt_optValue;
+   if ( ! $silent ) {
+     print "Backup data will be read in from $getOpt_optValue\n";
+   }
+ }
  elsif (uc($getOpt_optName) eq "R")  {
-   if ( $silent ne "Yes") {
+   if ( ! $silent ) {
      print "The report will be generated\n";
    }
    $printRep = "Yes";
@@ -215,31 +246,41 @@ while ( getOpt($getOpt_opt) ) {
 # ----------------------------------------------------
 
 chomp $machine;
-@ShortDay = ('Sun','Mon','Tue','Wed','Thu','Fri','Sat');
-($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
-$year = 1900 + $yearOffset;
+my ($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
+my $year = 1900 + $yearOffset;
 $month = $month + 1;
 $hour = substr("0" . $hour, length($hour)-1,2);
 $minute = substr("0" . $minute, length($minute)-1,2);
 $second = substr("0" . $second, length($second)-1,2);
 $month = substr("0" . $month, length($month)-1,2);
-$day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
-$Now = "$year.$month.$day $hour:$minute:$second";
-$NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
+my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
+my $nowTS = "$year.$month.$day $hour:$minute:$second";
 
-$instance = $ENV{'DB2INSTANCE'};
+my @ShortDay = ('Sun','Mon','Tue','Wed','Thu','Fri','Sat');
+my $Now = "$year.$month.$day $hour:$minute:$second";
+my $NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
 
-if ( $database eq "" ) {
-  usage ("Database must be supplied");
-  $a = `ldb.pl`;
-  print STDERR "Databases available in this instance are:\n\n$a";
-  $a = `db2list.pl -sX`;
-  print STDERR "Databases available in other instances on this server are:\n\n$a";
+my $instance = $ENV{'DB2INSTANCE'};
 
-  exit;
+if ( $database eq "") {
+  my $tmpDB = $ENV{'DB2DBDFT'};
+  if ( ! defined($tmpDB) ) {
+    usage ("A database must be provided");
+    my $a = `ldb.pl`;
+    print STDERR "Databases available in this instance are:\n\n$a";
+    $a = `db2list.pl -sX`;
+    print STDERR "Databases available in other instances on this server are:\n\n$a";
+    exit;
+  }
+  else {
+    if ( ! $silent ) {
+      print "Database defaulted to $tmpDB\n";
+    }
+    $database = $tmpDB;
+  }
 }
 
-$lastBackup = "Never";
+my $lastBackup = "Never";
 
 if ( $debugLevel > 0) { print "Processing $instance - $database ...... \n"; }
 
@@ -260,10 +301,35 @@ $machine = lc($machine);
 $instance = lc($instance);
 $database = uc($database);
 
-$currentState = "NotStarted";
-$linecnt = -1;
-$maxData = -1;
-$stuffToPrint = "No";
+my $currentState = "NotStarted";
+my $linecnt = -1;
+my @Data = ();
+my $maxData = -1;
+my $stuffToPrint = "No";
+my $linein = '';
+
+my $Start = '';
+my $End = '';
+my $Op = '';
+my $Obj = '';
+my $TS ='';
+my $Type = '';
+my $linein = '';
+my $Dev = '';
+my $ELog = '';
+my $CLog = '';
+my $BackupID = '';
+my $currentState = '';
+
+my $TS_fmt = '';
+my $numberOfTablespaces = '';
+my $Comment = '';
+my $End_fmt = '';
+my $Status = '';
+my $Location = '';
+my $TS_Seq = '';
+my $sqlcode = '';
+my $sqlerrmsg = '';
 
 while (<LBACKUPPIPE>) {
 
@@ -306,7 +372,7 @@ while (<LBACKUPPIPE>) {
 
     $linein = ltrim($_);
 
-    @lbackupinfo = split(/ +/,$linein);
+    my @lbackupinfo = split(/ +/,$linein);
 
     if ( $linecnt == 0 ) {
       # we have stopped counting down now ....
@@ -457,13 +523,16 @@ if (! open (CFGPIPE,"db2 get db cfg for $database |"))  {
 # Number of database backups to retain   (NUM_DB_BACKUPS) = 12
 #   Automatic database backup            (AUTO_DB_BACKUP) = OFF
 
-$logMethod1 = "";
-$logMethod2 = "";
-$numBackupsHeld = "";
-$AutoBackup = "";
+my $logMethod1 = "";
+my $logMethod2 = "";
+my $numBackupsHeld = "";
+my $AutoBackup = "";
+my $logprimary = '';
+my $logsecond = '';
+my $logfilsize = '';
 
 while (<CFGPIPE>) {
-    @cfginfo = split(/=/,$_);
+    my @cfginfo = split(/=/,$_);
     chomp $cfginfo[1];
     if ($cfginfo[0] =~ /First log archive method/) {
       $logMethod1 = trim($cfginfo[1]);  
@@ -498,6 +567,7 @@ if ($printRep eq "Yes") {
 }
 
 # print out the data if required
+my $lb_fmt = '';
 if ($genData eq "Yes") {
   for ( $i = 0; $i <= $maxData; $i++) {
     print "$Data[$i]\n";

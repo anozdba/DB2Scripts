@@ -2,10 +2,10 @@
 # --------------------------------------------------------------------
 # ldefs.pl
 #
-# $Id: ldefs.pl,v 1.7 2018/10/21 21:01:50 db2admin Exp db2admin $
+# $Id: ldefs.pl,v 1.14 2019/04/16 21:17:51 db2admin Exp db2admin $
 #
 # Description:
-# Script to list out the definitions of supplied entries
+# Script to provide database catalog defintions
 #
 # Usage:
 #   ldefs.pl
@@ -14,36 +14,32 @@
 #
 # ChangeLog:
 # $Log: ldefs.pl,v $
-# Revision 1.7  2018/10/21 21:01:50  db2admin
-# correct issue with script when run from windows (initialisation of run directory)
+# Revision 1.14  2019/04/16 21:17:51  db2admin
+# reorder the ingestData parms
 #
-# Revision 1.6  2018/10/18 22:58:51  db2admin
-# correct issue with script when not run from home directory
+# Revision 1.13  2019/04/09 05:08:54  db2admin
+# corerct formatting of output
 #
-# Revision 1.5  2018/10/17 01:11:55  db2admin
-# convert from commonFunction.pl to commonFunctions.pm
+# Revision 1.12  2019/03/28 23:28:40  db2admin
+# add in time/machine/instance details to listing
 #
-# Revision 1.4  2018/10/15 22:56:53  db2admin
-# correct text in help
+# Revision 1.11  2019/03/28 05:28:40  db2admin
+# adjust catalog defs for indirect database def
 #
-# Revision 1.3  2014/05/25 22:27:10  db2admin
-# correct the allocation of windows include directory
-#
-# Revision 1.2  2009/06/09 04:01:55  db2admin
-# correct but with database name comparison
-#
-# Revision 1.1  2009/06/09 03:10:03  db2admin
-# Initial revision
+# Revision 1.10  2019/03/28 05:14:11  db2admin
+# complete rewrite of the script using ingestData
 #
 #
-# --------------------------------------------------------------------
+# --------------------------------------------------------------------"
 
-my $ID = '$Id: ldefs.pl,v 1.7 2018/10/21 21:01:50 db2admin Exp db2admin $';
+use strict; 
+
+my $ID = '$Id: ldefs.pl,v 1.14 2019/04/16 21:17:51 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
 
-# Global Variables
+# Global Variables for standard routines
 
 my $debugLevel = 0;
 my $machine;   # machine we are running on
@@ -87,8 +83,34 @@ BEGIN {
     $tempDir = '/var/tmp/';
   }
 }
+chomp $machine;
+
+# included modules
+
 use lib "$scriptDir";
-use commonFunctions qw(trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $myDate_debugLevel $getOpt_diagLevel $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime $datecalc_debugLevel displayMinutes timeDiff timeAdd timeAdj convertToTimestamp getCurrentTimestamp);
+use commonFunctions qw(displayDebug ingestData trim ltrim rtrim commonVersion getOpt myDate $getOpt_web $getOpt_optName $getOpt_min_match $getOpt_optValue getOpt_form @myDate_ReturnDesc $cF_debugLevel  $getOpt_calledBy $parmSeparators processDirectory $maxDepth $fileCnt $dirCnt localDateTime displayMinutes timeDiff  timeAdj convertToTimestamp getCurrentTimestamp);
+
+# Global variables for this script
+
+my $currentRoutine = 'main';
+my $silent = 0;
+my $debugLevel = 0;
+my $printDetail = 1;
+my $exclude = 0;
+my $db_inFile = "";
+my $node_inFile = "";
+my $DBName_Sel = '';
+my $NodeName_Sel = '';
+my $generateDefs = 0;
+my $cmdPref = '';
+my $cmdSuff = '';
+my %generateNode = ();
+my %generateDB = ();
+my $displayNodes = 1;
+my $displayDBs = 1;
+
+###############################################################################
+# Subroutines and functions ......                                            #
 
 sub usage {
   if ( $#_ > -1 ) {
@@ -97,294 +119,413 @@ sub usage {
     }
   }
 
-  print "Usage: $0 -?hs [-i <instance>] [-d <database>]
+  print "Usage: $0 -?hs [-d <Database>] [-v[v]] [-p] [-x] [-g|-G] [-f] [-F] [-D | -N]
+                        [-f <file containing database defs>] [-F <file containing node defs>] 
 
-       Script to list out the definitions of supplied entries
+       Generate catalog definitions for databases and nodes
 
        Version $Version Last Changed on $Changed (UTC)
 
        -h or -?        : This help message
+       -D              : dont show nodes
+       -N              : dont show databases
+       -f              : file to read database info from (or STDIN)
+       -F              : file to read node info from (or STDIN)
+       -n              : only list nodes that contain this string
        -s              : Silent mode (dont produce the report)
-       -d              : Database to list (if not entered defaults to ALL)
-       -i              : Instance to query (if not entered then defaults to value of DB2INSTANCE variable)
-       \n";
-}
+       -d              : database (actually includes databases/nodes/aliases that include this string)
+       -S              : suppress detailed report
+       -g              : generate the definitions
+       -G              : generate the definitions and wrap the commands in db2 \" \"
+       -x              : exclude databases/nodes/aliases that include this string
+       -v              : debug level
 
-$infile = "";
-$DBName_Sel = "";
-$genDefs = "Y";
-$silent = "No";
-$instance = "";
+       Note: This script formats the output of a 'db2 list db directory' and 'db2 list node directory show detail' commands
+             -D and -N can not both specify STDIN
+       \n ";
+} # end of usage
 
-# ----------------------------------------------------
-# -- Start of Parameter Section
-# ----------------------------------------------------
+sub processParameters {
 
-# Initialise vars for getOpt ....
+  # ----------------------------------------------------
+  # -- Start of Parameter Section
+  # ----------------------------------------------------
 
-$getOpt_prm = 0;
-$getOpt_opt = ":?hsd:i:s";
+  while ( getOpt(":?hxgGsSNDF:n:f:d:v") ) {
+    if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
+      usage ("");
+      exit;
+    }
+    elsif (($getOpt_optName eq "s"))  {
+      $silent = "Yes";
+    }
+    elsif (($getOpt_optName eq "f"))  {
+      if ( ! $silent ) {
+        print "Database definitions will be read from file $getOpt_optValue (File should have been generated using 'db2 list db directory')\n";
+      }
+      $db_inFile = $getOpt_optValue;
+    }
+    elsif (($getOpt_optName eq "F"))  {
+      if ( ! $silent ) {
+        print "Node definitions will be read from file $getOpt_optValue (File should have been generated using 'db2 list node directory show detail')\n";
+      }
+      $node_inFile = $getOpt_optValue;
+    }
+    elsif (($getOpt_optName eq "n"))  {
+      if ( ! $silent ) {
+        print "Defs for nodes containing $getOpt_optValue will be listed\n";
+      }
+      $NodeName_Sel = $getOpt_optValue;
+    }
+    elsif (($getOpt_optName eq "d"))  {
+      if ( ! $silent ) {
+        print "Defs for databases containing $getOpt_optValue will be listed\n";
+      }
+      $DBName_Sel = $getOpt_optValue;
+    }
+    elsif (($getOpt_optName eq "S"))  {
+      $printDetail = 0;
+      if ( ! $silent ) {
+        print "Detailed report will be supressed\n";
+      }
+    }
+    elsif (($getOpt_optName eq "g"))  {
+      $generateDefs = 1;
+      if ( ! $silent ) {
+        print "Defs will be generated\n";
+      }
+    }
+    elsif (($getOpt_optName eq "N"))  {
+      $displayDBs = 0 ;
+      if ( ! $silent ) {
+        print "Databases will not be displayed\n";
+      }
+    }
+    elsif (($getOpt_optName eq "D"))  {
+      $displayNodes = 0 ;
+      if ( ! $silent ) {
+        print "Nodes will not be displayed\n";
+      }
+    }
+    elsif (($getOpt_optName eq "G"))  {
+      $generateDefs = 1;
+      $cmdPref = 'db2 "';
+      $cmdSuff = '"';
+      if ( ! $silent ) {
+        print "Defs will be generated and embedded in a db2 command\n";
+      }
+    }
+    elsif (($getOpt_optName eq "x"))  {
+      $exclude = 1;
+      if ( ! $silent ) {
+        print "blah blah blah will be excluded\n";
+      }
+    }
+    elsif (($getOpt_optName eq "v"))  {
+      $debugLevel++;
+      if ( ! $silent ) {
+        print "debug level set to $debugLevel\n";
+      }
+    }
+    elsif ( $getOpt_optName eq ":" ) {
+      usage ("Parameter $getOpt_optValue requires a parameter");
+      exit;
+    }
+    else { # handle other entered values ....
+      if ( $DBName_Sel eq "" ) {
+        $DBName_Sel = $getOpt_optValue;
+        if ( ! $silent ) {
+          print "Locks on database $DBName_Sel will be listed\n";
+        }
+      }
+      else {
+        usage ("Parameter $getOpt_optValue : is invalid");
+        exit;
+      }
+    }
+  }
+} # end of processparameters
 
-$getOpt_optName = "";
-$getOpt_optValue = "";
+# End of Subroutines and functions ......                                     #
+###############################################################################
 
-while ( getOpt($getOpt_opt) ) {
- if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
-   usage ("");
-   exit;
- }
- elsif (($getOpt_optName eq "s"))  {
-   $silent = "Yes";
- }
- elsif (($getOpt_optName eq "d"))  {
-   if ( $silent ne "Yes") {
-     print "Database $getOpt_optValue will be listed\n";
-   }
-   $DBName_Sel = $getOpt_optValue;
- }
- elsif (($getOpt_optName eq "i"))  {
-   if ( $silent ne "Yes") {
-     print "Instance $getOpt_optValue will be used\n";
-   }
-   $instance = getOpt_optValue;
-   $ENV{'DB2INSTANCE'} = $getOpt_optValue;
- }
- elsif ( $getOpt_optName eq ":" ) {
-   usage ("Parameter $getOpt_optValue requires a parameter");
-   exit;
- }
- else { # handle other entered values ....
-   if ( $instance eq "" ) {
-     $instance = getOpt_optValue;
-     $ENV{'DB2INSTANCE'} = $getOpt_optValue;
-     if ( $silent ne "Yes") {
-       print "Instance $getOpt_optValue will be used\n";
-     }
-   }
-   elsif ( $DBName_Sel eq "" ) {
-     $DBName_Sel = $getOpt_optValue;
-     if ( $silent ne "Yes") {
-       print "Database $DBName_Sel will be listed\n";
-     }
-   }
-   else {
-     usage ("Parameter $getOpt_optName : Will be ignored");
-   }
- }
-}
-
-# ----------------------------------------------------
-# -- End of Parameter Section
-# ----------------------------------------------------
-
-chomp $machine;
-($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
-$year = 1900 + $yearOffset;
-$month = $month + 1;
+my @ShortDay = ('Sun','Mon','Tue','Wed','Thu','Fri','Sat');
+my ($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
+my $year = 1900 + $yearOffset;
+my $month = $month + 1;
 $hour = substr("0" . $hour, length($hour)-1,2);
-$minute = substr("0" . $minute, length($minute)-1,2);
-$second = substr("0" . $second, length($second)-1,2);
-$month = substr("0" . $month, length($month)-1,2);
-$day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
-$Now = "$year.$month.$day $hour:$minute:$second";
+my $minute = substr("0" . $minute, length($minute)-1,2);
+my $second = substr("0" . $second, length($second)-1,2);
+my $month = substr("0" . $month, length($month)-1,2);
+my $day = substr("0" . $dayOfMonth, length($dayOfMonth)-1,2);
+my $NowTS = "$year.$month.$day $hour:$minute:$second";
+my $NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
+my $date = "$year.$month.$day";
 
-if (! open (LDBPIPE,"db2 list db directory | "))  { die "Can't run db2 list db! $!\n"; }
-
-if ($DBName_Sel eq "") {
-  $DBName_Sel = "ALL";
+if ( (uc($node_inFile) eq 'STDIN') and ( uc($db_inFile) eq 'STDIN') ) { # this isn't allowed
+  usage ("Only one input file can be from STDIN");
+  exit;
 }
 
-$numHeld = -1;
+# set variables based on parameters
+processParameters();
 
-# Print Headings ....
-if ( $silent ne "Yes") {
-  print "Database listing from Machine: $machine Instance: $ENV{'DB2INSTANCE'} ($Now) .... \n\n";
-  printf "%-8s %-8s %-10s %4s %-20s %-40s \n",
-         'Alias', 'Database', 'Type', 'Comment', 'Directory/Node(Authentication)';
-  printf "%-8s %-8s %-10s %-20s %-40s \n",
-         '--------', '--------', '----------', '--------------------', '----------------------------------------';
+# set debug level in commonFunctions module
+$cF_debugLevel = $debugLevel;
+
+# organise where the input is coming from
+
+my $inputpipe;
+if ( $db_inFile ne "" ) {
+  displayDebug("DB Directory list will be read from $db_inFile",1,$currentRoutine);
+  if ( $db_inFile eq 'STDIN' ) {
+    if (! open ($inputpipe,"-"))  { die "Can't open STDIN for input $!\n"; }
+  }
+  else {
+    if (! open ($inputpipe,"<","$db_inFile"))  { die "Can't open $db_inFile for input$!\n"; }
+  }
+}
+else {
+  displayDebug("Issuing: db2 list db directory ",1,$currentRoutine);
+  if (! open ($inputpipe,"db2 list db directory |"))  { 
+    die "Can't run db2 list db directory! $!\n";
+  }
 }
 
-while (<LDBPIPE>) {
-   #   Database 1 entry:
+# entries to be gathered form the 'list db directory' and the 'list node directory' commands
 
-   #    Database alias                       = GM2STTST
-   #    Database name                        = GM2STTST
-   #    Local database directory             = /db2/gm2sttst
-   #    Database release level               = a.00
-   #    Comment                              =
-   #    Directory entry type                 = Indirect
-   #    Catalog database partition number    = 0
-   #    Alternate server hostname            =
-   #    Alternate server port number         =
+# ----------------------------------------------------------------------------------
+# Database 98 entry:
+# 
+#  Database alias                       = ESBSMP01
+#  Database name                        = ESBSMP01
+#  Node name                            = ESB2I1P
+#  Database release level               = 10.00
+#  Comment                              =
+#  Directory entry type                 = Remote
+#  Catalog database partition number    = -1
+#  Alternate server hostname            = esbdbld3prd.KAGJCM.local
+#  Alternate server port number         = 60000
+#
+# Node 184 entry:
+# 
+#  Node name                      = SSYSIN7D
+#  Comment                        =
+#  Directory entry type           = LOCAL
+#  Protocol                       = TCPIP
+#  Hostname                       = ssdb1dev
+#  Service name                   = 50024
+#  Remote instance name           =
+#  System                         =
+#  Operating system type          = None
+# 
+# ---------------------------------------------------------------------------------
+
+my %databaseData = ();         # structure to hold the returned data
+
+my %valid_entries = (
+  "Database alias"              => 1,
+  "Database name"               => 1,
+  "Comment"                     => 1,
+  "Directory entry type"        => 1,
+  "Local database directory"    => 1,
+  "Node name"                   => 1,
+  "Hostname"                    => 1,
+  "Service name"                => 1,
+  "Authentication"              => 1,
+  "Protocol"                    => 1
+);
+
+# load the report data into an internal data structure
+ingestData ($inputpipe, '=', \%valid_entries, \%databaseData, '', 'Database (.*) entry\:','','','');
+
+if ( $debugLevel > 0 ) { # print out the available keys
+  foreach my $key ( sort keys %databaseData ) { # looping through the 'Database data records'
+    displayDebug("Key: $key Data: $databaseData{$key}",1,$currentRoutine);
+  }
+}
+
+# close the input file
+
+close $inputpipe;
+
+if ( $node_inFile ne "" ) {
+  displayDebug("DB Directory list will be read from $node_inFile",1,$currentRoutine);
+  if ( $node_inFile eq 'STDIN' ) {
+    if (! open ($inputpipe,"-"))  { die "Can't open STDIN for input $!\n"; }
+  }
+  else {
+    if (! open ($inputpipe,"<","$node_inFile"))  { die "Can't open $node_inFile for input$!\n"; }
+  }
+}
+else {
+  displayDebug("Issuing: db2 list node directory show detail",1,$currentRoutine);
+  if (! open ($inputpipe,"db2 list node directory show detail |"))  {
+    die "Can't run db2 list node directory! $!\n";
+  }
+}
+
+my %nodeData = ();         # structure to hold the returned data
+
+# load the report data into an internal data structure
+ingestData ($inputpipe, '=', \%valid_entries, \%nodeData, '', 'Node name','','','');
+
+if ( $debugLevel > 0 ) { # print out the available keys
+  foreach my $key ( sort keys %nodeData ) { # looping through the 'Node data records'
+    displayDebug("Key: $key Data: $nodeData{$key}",1,$currentRoutine);
+    foreach my $key2 ( sort keys %{$nodeData{$key}} ) { # looping through the 'Node data records keys'
+      displayDebug("sub-Key: $key2 Data: $nodeData{$key}{$key2}",1,$currentRoutine);
+    }
+  }
+}
+
+# close the input file
+
+close $inputpipe;
+
+# now process the loaded data
+
+my $firstEntryInfo = 1;      # flag for printing headings for app data
+my $dirNode = '';            # directory or node information
+my $node = '';               # node information
 
 
-   chomp $_;
-    @ldbinfo = split(/=/);
+if ( $displayDBs ) {
+  foreach my $entry ( sort by_type_name_value keys %databaseData) { # looping through each of the database records
 
-#   print "$ldbinfo[0] : $ldbinfo[1]\n";
-
-    if ( trim($ldbinfo[0]) eq "Database alias") {
-      $DBName = "";
-      $NodeName = "";
-      $Authentication = "";
-      $commlit = "";
-      $DBAlias = trim($ldbinfo[1]);
+    if ( $DBName_Sel ne '' ) { # some selection is being done
+      if ( ( uc($databaseData{$entry}{'Database name'}) !~ uc($DBName_Sel) ) &&
+           ( uc($databaseData{$entry}{'Node name'}) !~ uc($DBName_Sel) ) &&
+           ( uc($databaseData{$entry}{'Database alias'}) !~ uc($DBName_Sel) ) ) { 
+        next; 
+      } # skip this record as not selected 
     }
 
-    if ( trim($ldbinfo[0]) eq "Database name") {
-      $DBName = trim($ldbinfo[1]);
+    if ( $NodeName_Sel ne '' ) { # some selection is being done
+      if ( uc($databaseData{$entry}{'Node name'}) !~ uc($NodeName_Sel) ) {
+        next; 
+      } # skip this record as not selected 
     }
+  
+    displayDebug("Database Entry $entry being processed",1, $currentRoutine);
 
-    if ( trim($ldbinfo[0]) eq "Node name") {
-      $NodeName = trim($ldbinfo[1]);
-    }
+    if ( $entry eq 'root' ) { next; } # skip root entry
 
-    if ( (trim($ldbinfo[0]) eq "Local database directory") || (trim($ldbinfo[0]) eq "Database drive") ) {
-      $localDir = trim($ldbinfo[1]);
-    }
-
-    if ( trim($ldbinfo[0]) eq "Authentication") {
-      $Authentication = trim($ldbinfo[1]);
-    }
-
-    if ( trim($ldbinfo[0]) eq "Comment") {
-      $Comment = trim($ldbinfo[1]);
-    }
-
-    if ( trim($ldbinfo[0]) eq "Directory entry type") {
-      $dirEntryType = trim($ldbinfo[1]);
-    }
-
-    if ( (trim($ldbinfo[0]) eq "Catalog database partition number") || (trim($ldbinfo[0]) eq "Catalog node number") ) {
-      $catDBPartNum = trim($ldbinfo[1]);
-      if ( $dirEntryType eq "Remote") {
-        if ( $Authentication eq "" ) {
-          $localDir = "$NodeName";
-        }
-        else {
-          $localDir = "$NodeName ($Authentication)";
-        }
-      }
-#      print "catDBPartNum=$catDBPartNum   >>> $DBName_Sel\n";
-      
-      if ( (uc($DBName_Sel) eq uc($DBName)) || (uc($DBName_Sel) eq "ALL") ||  (uc($DBName_Sel) eq uc($DBAlias)) ) {
-        $commlit = ""; 
-        if ($comment ne "") {
-          $commlit = "with \"$comment\"";
-        }
-        if ( $dirEntryType eq "Indirect") {
-          if ( $silent ne "Yes") {
-            printf "%-8s %-8s %-10s %-20s %-40s\n",
-                 $DBAlias,$DBName,$dirEntryType,$Comment,$localDir;
-          }
-          if ( $genDefs eq "Y") {
-            $catalogDefs{$DBAlias} = "catalog db $DBName as $DBAlias on $localDir $commlit\n";
-          }
-        }
-        else {
-          # not a local database so save and print later ....
-          $hold{$DBName} = sprintf "%-8s %-8s %-10s %-20s %-40s",
-               $DBAlias,$DBName,$dirEntryType,$Comment,$localDir;
-          if ( $genDefs eq "Y") {
-            $node_hostname = "";
-            $node_nodename = "";
-            $node_comment = "";
-            $node_DirEntryType = "";
-            $node_serviceName = "";
-            $node_Instance = "";
-            $node_protocol = "";
-            if (! open (LNODEPIPE,"db2 list node directory | "))  { die "Can't run db2 list db! $!\n"; }
-            while (<LNODEPIPE>) {
-              chomp $_;
-              @lnodeinfo = split(/=/);
-              if ( $_ =~ /Node name/ ) {
-                $node_nodename = trim($lnodeinfo[1]);
-                $correctNode = "No";
-                if ( $node_nodename eq $NodeName ) {
-                  $correctNode = "Yes";
-                }
-              }
-              if ( $_ =~ /Comment/ ) {
-                $node_comment = trim($lnodeinfo[1]);
-                if ($node_comment ne "") {
-                  $node_commlit = "with \"$node_comment\"";
-                }
-              }
-              elsif ( $_ =~ /Directory entry type/ ) {
-                $node_DirEntryType = trim($lnodeinfo[1]);
-              }
-              elsif ( $_ =~ /Protocol/ ) {
-                $node_protocol =  trim($lnodeinfo[1]);
-              }
-              elsif ( $_ =~ /Hostname/ ) {
-                $node_hostname =  trim($lnodeinfo[1]);
-              }
-              elsif ( $_ =~ /Instance/ ) {
-                $node_Instance =  trim($lnodeinfo[1]);
-              }
-              elsif ( $_ =~ /Service name/ ) {
-                $node_serviceName =  trim($lnodeinfo[1]);
-                if ( $correctNode eq "Yes" ) {
-                  $hold{$DBName} = trim($hold{$DBName}) . "  Node $node_nodename : remote server = $node_hostname, port = $node_serviceName, protocol = $node_protocol";
-                  if (uc($node_protocol) eq "TCPIP") {
-                    $catalogNodeDefs{$node_nodename} = "catalog $node_protocol node $node_nodename remote $node_hostname server $node_serviceName $node_commlit\n";
-                  }
-                  elsif (uc($node_protocol) eq "LOCAL") {
-                    $catalogNodeDefs{$node_nodename} = "catalog $node_protocol node $node_nodename instance $node_Instance $node_commlit\n";
-                  }
-                }  
-              }
-            }
-
-            if ( $Authentication eq "" ) {
-              $catalogDefs{$DBAlias} = "catalog db $DBName as $DBAlias at node $NodeName $commlit\n";
-            }
-            else { 
-              $catalogDefs{$DBAlias} = "catalog db $DBName as $DBAlias at node $NodeName authentication $Authentication $commlit\n";
-            }
-          }
-          $DBName = "";
-          $DBAlias = "";
-          $NodeName = "";
-          $Authentication = "";
-          $commlit = "";
-        }
+    if ( $printDetail ) { # print out the database detail
+      if ( $firstEntryInfo ) {
+        print "Database listing from Machine: $machine Instance: $ENV{'DB2INSTANCE'} ($NowTS) .... \n\n";
+        printf " %-10s %-10s %-8s %-20s %-30s", 'DB Alias','DB Name','Type','Comment','Directory/Node(Authentication)';
+        printf " %-20s %-10s %-10s\n", 'Hostname', 'Protocol', 'Port/Service';
+        printf " %10s %-10s %-8s %-20s %30s", '----------','----------','--------','--------------------','------------------------------';
+        printf " %-20s %-10s %-10s\n", '--------------------', '----------', '------------';
+        $firstEntryInfo = 0;
       }
     }
-}
 
-# Print out the remote databases at the end ....
+    $node = '';
+    $dirNode = '';
+    if ( defined($databaseData{$entry}{'Node name'}) ) { 
+      $dirNode = $databaseData{$entry}{'Node name'}; 
+      $node = $databaseData{$entry}{'Node name'};
+    } 
 
-if ( $silent ne "Yes") {
-  foreach $key (sort by_key keys %hold ) {
-    print "$hold{$key}\n";
+    if ( defined($databaseData{$entry}{'Authentication'}) ) { $dirNode .= ' (' . $databaseData{$entry}{'Authentication'} . ')' ; } 
+    elsif ( defined($databaseData{$entry}{'Local database directory'}) ) { $dirNode = $databaseData{$entry}{'Local database directory'};  }  
+
+    if ( $printDetail ) { # print out the database detail
+      # print out the database information
+      printf " %-10s %-10s %-8s %20s %-30s", $databaseData{$entry}{'Database alias'}, $databaseData{$entry}{'Database name'}, $databaseData{$entry}{'Directory entry type'}, $databaseData{$entry}{'Comment'}, $dirNode;
+  
+      # print out the node information
+      printf " %-20s %-10s %-10s\n", $nodeData{$node}{'Hostname'}, $nodeData{$node}{'Protocol'}, $nodeData{$node}{'Service name'};
+    }
+  
+    # generate the definitions as necessary
+    if ( $generateDefs ) {
+      # construct the Node def
+      if ( defined($nodeData{$node}{'Hostname'}) ) {
+        if (  $nodeData{$node}{'Protocol'} eq 'TCPIP' ) {
+          $generateNode{$node} = "${cmdPref}catalog  $nodeData{$node}{'Protocol'} node $node remote $nodeData{$node}{'Hostname'} server $nodeData{$node}{'Service name'}$cmdSuff";
+        }
+        else { # treat the same as TCPIP
+          $generateNode{$node} = "${cmdPref}catalog  $nodeData{$node}{'Protocol'} node $node remote $nodeData{$node}{'Hostname'} server $nodeData{$node}{'Service name'}$cmdSuff";
+        }
+      }
+      # construct the DB def
+      my $commLit = '';
+      if ( defined($databaseData{$entry}{'Comment'})  && ( $databaseData{$entry}{'Comment'} ne '' ) ) { $commLit = " with \"" . $databaseData{$entry}{'Comment'} . "\" "; }
+      my $authLit = '';
+      if ( defined($databaseData{$entry}{'Authentication'}) ) { $authLit = " authentication \"" . $databaseData{$entry}{'Authentication'} . "\" "; }
+  
+      if ( defined($nodeData{$node}{'Hostname'}) ) {
+        $generateDB{$databaseData{$entry}{'Database alias'}} = "${cmdPref}catalog db $databaseData{$entry}{'Database name'} as $databaseData{$entry}{'Database alias'} at node $node $authLit $commLit $cmdSuff";
+      }
+      else {
+        $generateDB{$databaseData{$entry}{'Database alias'}} = "${cmdPref}catalog db $databaseData{$entry}{'Database name'} as $databaseData{$entry}{'Database alias'} on '$dirNode' $authLit $commLit $cmdSuff";
+      }
+    }
   }
 }
+elsif ( $displayNodes ) {
+  foreach my $node ( sort keys %nodeData) { # looping through each of the node records
 
-# Print out definitions if required ....
+    if ( $NodeName_Sel ne '' ) { # some selection is being done
+      if ( uc($node) !~ uc($NodeName_Sel) ) {
+        next;
+      } # skip this record as not selected
+    }
 
-if ($genDefs eq "Y") {
+    displayDebug("Node Entry $node being processed",1, $currentRoutine);
 
-  if ( $silent ne "Yes") {
-    print "\nGenerated CATALOG DB definitions:\n\n";
-  }
+    if ( $node eq 'root' ) { next; } # skip root entry
 
-  foreach $key (sort by_key keys %catalogNodeDefs ) {
-    print "$catalogNodeDefs{$key}";
-  }
-  foreach $key (sort by_key keys %catalogDefs ) {
-    print "$catalogDefs{$key}";
+    if ( $printDetail ) { # print out the database detail
+      if ( $firstEntryInfo ) {
+        print "Node listing from Machine: $machine Instance: $ENV{'DB2INSTANCE'} ($NowTS) .... \n\n";
+        printf "%-20s %-30s %-10s %-10s\n", 'Node', 'Hostname', 'Protocol', 'Port/Service';
+        printf "%-20s %-30s %-10s %-10s\n", '--------------------', '------------------------------', '----------', '----------';
+        $firstEntryInfo = 0;
+      }
+    }
+
+    if ( $printDetail ) { # print out the node detail
+      # print out the node information
+      printf "%-20s %-30s %-10s %-10s\n", $node, $nodeData{$node}{'Hostname'}, $nodeData{$node}{'Protocol'}, $nodeData{$node}{'Service name'};
+    }
+
+    # generate the definitions as necessary
+    if ( $generateDefs ) {
+      # construct the Node def
+      if (  $nodeData{$node}{'Protocol'} eq 'TCPIP' ) {
+        $generateNode{$node} = "${cmdPref}catalog  $nodeData{$node}{'Protocol'} node $node remote $nodeData{$node}{'Hostname'} server $nodeData{$node}{'Service name'}$cmdSuff";
+      }
+      else { # treat the same as TCPIP
+        $generateNode{$node} = "${cmdPref}catalog  $nodeData{$node}{'Protocol'} node $node remote $nodeData{$node}{'Hostname'} server $nodeData{$node}{'Service name'}$cmdSuff";
+      }
+    }
   }
 }
 
-if ( $silent ne "Yes") {
-  print "\n";
+# print out catalog definitions if required
+
+if ( $generateDefs ) {
+  if ( $displayNodes ) {
+    print "\n\nGenerated node definitons entries ........\n";
+    foreach my $node ( sort keys %generateNode ) {
+      print "$generateNode{$node}\n";
+    }
+  }
+  if ( $displayDBs ) {
+    print "\nGenerated database definitons entries ........\n";
+    foreach my $db ( sort keys %generateDB ) {
+      print "$generateDB{$db}\n";
+    }
+  }
 }
 
 # Subroutines and functions ......
 
-sub by_key {
-  $a cmp $b ;
+sub by_type_name_value {
+  $databaseData{$a}{'Directory entry type'} . $databaseData{$a}{'Database name'} cmp $databaseData{$b}{'Directory entry type'} . $databaseData{$b}{'Database name'};
 }
 
