@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lts.pl
 #
-# $Id: lts.pl,v 1.34 2019/07/23 01:32:21 db2admin Exp db2admin $
+# $Id: lts.pl,v 1.39 2019/08/14 21:44:09 db2admin Exp db2admin $
 #
 # Description:
 # Script to format the output of a LIST TABLESPACES command
@@ -14,6 +14,26 @@
 #
 # ChangeLog:
 # $Log: lts.pl,v $
+# Revision 1.39  2019/08/14 21:44:09  db2admin
+# correct the way that the default data source is selected
+#
+# Revision 1.38  2019/08/05 22:28:53  db2admin
+# only print out variations in options when -s option hasn't been selected
+#
+# Revision 1.37  2019/08/05 22:23:44  db2admin
+# 1. add in option to preserve the case of machine, instance and database
+# 2. by default make machine and instance lower case
+# 3. force option -x when -D option selected
+# 4. increase the size of state for 'list tablespaces' option (even though it doesn't seem to be used)
+# 5. modify the option checking to default values when required
+#
+# Revision 1.36  2019/07/31 04:49:27  db2admin
+# only print out messages when silent hasn't been selected
+#
+# Revision 1.35  2019/07/31 04:04:54  db2admin
+# convert a maxsize of NONE to NULL
+# ensure database is upper case in the data file
+#
 # Revision 1.34  2019/07/23 01:32:21  db2admin
 # correct bug in calculation of free Mb when using list tablespaces
 #
@@ -141,7 +161,7 @@
 
 use strict;
 
-my $ID = '$Id: lts.pl,v 1.34 2019/07/23 01:32:21 db2admin Exp db2admin $';
+my $ID = '$Id: lts.pl,v 1.39 2019/08/14 21:44:09 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -252,8 +272,8 @@ sub usage {
     }
   }
 
-  print "Usage: $0 -?hs [-l | -m | -S [[-c] [-F] [-g [-p <prefix>] [-e] [-T]]]
-                [-d <database> | -f <Filename>] [-t <tablespace>] [-v[v]]
+  print "Usage: $0 -?hs [-d <database> | -f <Filename>] [-t <tablespace>] [-v[v]]
+                [-l | -m | -S [[-c] [-O] [-F] [-g [-p <prefix>] [-e] [-T]] [-D [-L]]]
 
        Version $Version Last Changed on $Changed (UTC)
 
@@ -271,9 +291,8 @@ sub usage {
        -m              : SQL based on MON_GET_TABLESPACE (see lts.sql)
        -S or -x        : use 'get snapshot for tablespaces on <database>' to get data
 
-  ## Snapshot (-S) Data Source options
+  ## Snapshot (-S or -x) Data Source options
        -c              : display container information
-       -D              : generate the data files to load
        -O              : dont produce the report (omit it)
        -g              : generate SET TABLESPACE commands
        -e              : parcel SET TABLESPACE commands in a DB2 \"\" statement
@@ -281,6 +300,9 @@ sub usage {
        -p              : string used to generate new file name when processing with -g (ignored unless -g specified)
        -D              : generate the data files to load
        -F              : generate file dircmd_<database>.bat with a unique list of commands to determine free space for all container mount points
+       -L              : leave the case of machine, instance and database as it is
+
+     NOTE: if any of the Snapshot specific options are selected then option -x WILL be forced
 \n";
 
 }
@@ -292,9 +314,9 @@ my $TSName = "ALL";
 my $database = "";
 my $silent = 0;
 my $debugLevel = 0;
-my $monGetTablespace = 0;
+my $useMonGetTablespace = 0;
 my $useSnapshot = 0;
-my $useList = 1;
+my $useList = 0;
 my $showContainers = 0;
 my $generateSETTS = 0;
 my $generateReport = 1;
@@ -304,6 +326,7 @@ my $useTotalAlloc = 0;
 my $genDriveDir  = 0;
 my $useDB2CMD = 0;
 my $currentRoutine = 'Main';
+my $changeCase = 1;
 
 # ----------------------------------------------------
 # -- Start of Parameter Section
@@ -311,7 +334,7 @@ my $currentRoutine = 'Main';
 
 # Initialise vars for getOpt ....
 
-while ( getOpt(":?hsxODmFcgleSTvp:f:d:t:") ) {
+while ( getOpt(":?hsxODmFcgLeSTvlp:f:d:t:") ) {
  if (($getOpt_optName eq "h") || ($getOpt_optName eq "?") )  {
    usage ("");
    exit;
@@ -324,6 +347,12 @@ while ( getOpt(":?hsxODmFcgleSTvp:f:d:t:") ) {
    $cF_debugLevel++;
    if ( ! $silent ) {
      print "Debug Level set to $debugLevel\n";
+   }
+ }
+ elsif (($getOpt_optName eq "L"))  {
+   $changeCase = 0;
+   if ( ! $silent ) {
+     print "The case of machine, instance and database will be preserved\n";
    }
  }
  elsif (($getOpt_optName eq "c"))  {
@@ -370,7 +399,7 @@ while ( getOpt(":?hsxODmFcgleSTvp:f:d:t:") ) {
    }
  }
  elsif (($getOpt_optName eq "m"))  {
-   $monGetTablespace = 1;
+   $useMonGetTablespace = 1;
    if ( ! $silent ) {
      print "Extended reporting via MON_GET_TABLESPACE will be done\n";
    }
@@ -381,7 +410,7 @@ while ( getOpt(":?hsxODmFcgleSTvp:f:d:t:") ) {
      print "get snapshot will be used to obtain data\n";
    }
  }
- elsif (($getOpt_optName eq "l") || ($getOpt_optName eq "x"))  {
+ elsif ( ($getOpt_optName eq "l") )  {
    $useList = 1;
    if ( ! $silent ) {
      print "list tablespaces will be used to obtain data\n";
@@ -463,6 +492,8 @@ my $NowTS = "$year.$month.$day $hour:$minute:$second";
 my $NowDayName = "$year/$month/$day ($ShortDay[$dayOfWeek])";
 my $date = "$year.$month.$day";
 
+# Check the options that have been selected
+
 if ( $database eq "") {
   my $tmpDB = $ENV{'DB2DBDFT'};
   if ( ! defined($tmpDB) ) {
@@ -477,9 +508,45 @@ if ( $database eq "") {
   }
 }
 
-if ( $useList && $monGetTablespace && $useSnapshot) {
-  print "-m and -S are mutually exclusive. -m will be ignored\n";
-  $monGetTablespace = 0;
+if ( $useList + $useMonGetTablespace + $useSnapshot == 0 ) { # no method has been set - default to 'get list'
+  if ( ! $silent ) { print "Defaulted to using 'db2 list tablespaces'\n"; }
+  $useList = 1;
+}
+
+if ( $useList + $useMonGetTablespace + $useSnapshot > 1 ) { # more than one method has been set
+  if ( $useSnapshot ) { # -x or -S has been set
+    if ( ! $silent ) { print "Options -x, -m and -l are mutually exclusive - option x will be used\n"; }
+    $useMonGetTablespace = 0;
+    $useList = 0;
+  }
+  elsif ( $useMonGetTablespace ) {  # -m has bene set
+    if ( ! $silent ) { print "Options -m and -l are mutually exclusive - option m will be used\n"; }
+    $useList = 0;
+  }
+}
+
+if ( $useList || $useMonGetTablespace ) { # check to make sure a snapshot only option has not been selected
+  if ( $useDB2CMD || $useTotalAlloc || ($prefix ne '' ) ) { # options for the generate SET TS option have been set
+    if ( ! $silent ) { print "Option -g assumed : An option for the generate SET TS (-g) has been selected\n";  }
+    $generateSETTS = 1;
+  }
+    
+  if ( ( ! $changeCase ) && ( ! $generateData ) ) { # change case is only applicable when data is being generated
+    if ( ! $silent ) { print "Option -D assumed : Retain case is only applicatible when data is being generated\n";  }
+    $generateData = 1;
+  }
+    
+  if ( ( ! $generateReport ) && ( ! $generateData ) ) { # given that the report is being ommitted it is assumed that the data is wanted
+    if ( ! $silent ) { print "Option -D assumed : It only makes sense to exclude the report if you only want the data\n";  }
+    $generateData = 1;
+  }
+    
+  if ( $generateData || $generateSETTS || $genDriveDir || $showContainers || ! $generateReport ) { # can only select -O, -c, -F, -g, -D when -x selected
+    if ( ! $silent ) { print "Option -x assumed : When one of -O, -c, -F, -g or -D is selected then option x MUST be selected\n"; }
+    $useSnapshot = 1; 
+    $useList = 0;
+    $useMonGetTablespace = 0;
+  }
 }
 
 my $TotAlloc = 0;
@@ -496,7 +563,7 @@ if (! open(STDCMD, ">ltscmd.bat") ) {
 
 print STDCMD "db2 connect to $database\n";
 if ( $debugLevel > 0 ) { print "To be executed: db2 connect to $database\n"; }
-if ( $monGetTablespace ) {
+if ( $useMonGetTablespace ) {
   print "If SMS database statistics aren't being displayed then you should turn on\n";
   print "buffer pool statistics using the following commands:\n";
   print "                db2 attach to $ENV{'DB2INSTANCE'}\n"; 
@@ -539,7 +606,7 @@ else {
 }
 
 # Print Headings ....
-if ( $monGetTablespace ) { # use mon_get_tablespace
+if ( $useMonGetTablespace ) { # use mon_get_tablespace
   print "Tablespace listing from MON_GET_TABLESPACE for Machine: $machine Instance: $ENV{'DB2INSTANCE'} Database: $database ($NowTS) .... \n\n";
   printf "%-4s %-18s %-4s %-17s %-12s %-10s %9s %9s %9s %9s %9s %1s %5s %10s %10s %-12s\n",
          '', '', '', '', '', '', '', '', '', '', '', 'L', 'Page','';
@@ -561,12 +628,12 @@ elsif ( $useSnapshot ) { # use get snapshot
 }
 elsif  ( $useList ) { # use list tablespace
   print "Tablespace listing from LIST TABLESPACES for Machine: $machine Instance: $ENV{'DB2INSTANCE'} Database: $database ($NowTS) .... \n\n";
-  printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-6s\n",
+  printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-12s\n",
          '', '', '', '', '', '', '', '', 'L', 'Page','','','','';
-  printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-6s\n",
+  printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-12s\n",
          'TSID', 'Tablespace Name', 'Type', 'Contents', 'Total Pgs', 'Used Pgs', 'Free Pgs', 'HWM', 'H', 'Size','Used Mb', 'Alloc Mb', 'Free Mb', 'State';
-  printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-6s\n",
-         '----', '------------------', '----', '-----------------', '---------', '---------', '---------', '---------', '-', '-----', '----------', '----------', '----------', '------';
+  printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-12s\n",
+         '----', '------------------', '----', '-----------------', '---------', '---------', '---------', '---------', '-', '-----', '----------', '----------', '----------', '------------';
 }
 
 my $abort = 0;
@@ -677,8 +744,32 @@ if ( $useSnapshot ) {
       $TotUsed += $usedMb;
     
       if ( $generateData ) { # generate tablespace data
+
+        my $maxSize = $data{$tblspace}{"Maximum tablespace size (bytes)"};
+        if ( $maxSize eq 'NONE' )  { $maxSize = 'NULL'; }
       
-        $dataOut{$data{$tblspace}{"Tablespace ID"} . 'ATS'} = "TABLESPACE,$NowTS,$machine,$instance," . 
+        if ( $changeCase ) {
+          $dataOut{$data{$tblspace}{"Tablespace ID"} . 'ATS'} = "TABLESPACE,$NowTS," .
+                      lc($machine) . "," .
+                      lc($instance) . "," .
+                      uc($database) . 
+                      ",$tblspace,$data{$tblspace}{\"Tablespace ID\"}," .
+                      "$data{$tblspace}{\"Tablespace Type\"}," .
+                      "$data{$tblspace}{\"Tablespace Content Type\"}," .
+                      "$data{$tblspace}{\"Tablespace State\"}," .
+                      "$data{$tblspace}{\"Total number of pages\"}," .
+                      "$data{$tblspace}{\"Number of used pages\"}," .
+                      "$data{$tblspace}{\"Number of free pages\"}," .
+                      "$data{$tblspace}{\"High water mark (pages)\"}," .
+                      "$data{$tblspace}{\"Tablespace Page size (bytes)\"}," .
+                      "$usedMb," .
+                      "$data{$tblspace}{\"Number of containers\"}," .
+                      "$data{$tblspace}{\"Auto-resize enabled\"}," .
+                      "$date," .
+                      "$maxSize," . "\n";
+        }
+        else {
+          $dataOut{$data{$tblspace}{"Tablespace ID"} . 'ATS'} = "TABLESPACE,$NowTS,$machine,$instance," . 
                       "$database,$tblspace,$data{$tblspace}{\"Tablespace ID\"}," .
                       "$data{$tblspace}{\"Tablespace Type\"}," .        
                       "$data{$tblspace}{\"Tablespace Content Type\"}," .        
@@ -692,7 +783,8 @@ if ( $useSnapshot ) {
                       "$data{$tblspace}{\"Number of containers\"}," .        
                       "$data{$tblspace}{\"Auto-resize enabled\"}," .        
                       "$date," . 
-                      "$data{$tblspace}{\"Maximum tablespace size (bytes)\"}," . "\n";
+                      "$maxSize," . "\n";
+        }
       }
       
       my $firstContainer = 1;
@@ -730,7 +822,7 @@ if ( $useSnapshot ) {
           if ( $generateData ) { # generate container data
             $cont_mb_alloc = int($cont_mb_alloc);
             $dataOut{$data{$tblspace}{"Tablespace ID"} . 'CNT'} = "CONTAINER,$NowTS,$machine,$instance," . 
-                         "$database,$tblspace,$data{$tblspace}{\"Tablespace ID\"}," .
+                         uc($database) . ",$tblspace,$data{$tblspace}{\"Tablespace ID\"}," .
                          "$data{$tblspace}{$key}{\"Container ID\"}," .
                          "$CName,$type," .
                          "$data{$tblspace}{$key}{\"Total Pages in Container\"}," .        
@@ -798,7 +890,7 @@ if ( $useSnapshot ) {
   }
   if ( $genDriveDir ) { # produce a file of directory list commands
     if (! open(DIRCMD, ">dircmd_$database.bat") ) { die "Unable to open a file to hold the dir commands to run $!\n"; }
-    print "starting to write out commands\n";
+    if ( ! $silent ) { print "starting to write out commands\n"; }
     print DIRCMD "echo \"SERVER: $machine\"\n";
 
     foreach my $drive ( sort keys %drives ) {
@@ -841,7 +933,7 @@ else { # either MON_GET_TABLESPACE or LIST TABLESPACES
       }
     }
 
-    if ( $monGetTablespace ) { # use sql against the database
+    if ( $useMonGetTablespace ) { # use sql against the database
       $lowerHWM = ' ';
       @ltsinfo = split(" ",$_,15);
       $TotAlloc = $TotAlloc + $ltsinfo[10];
@@ -931,7 +1023,7 @@ else { # either MON_GET_TABLESPACE or LIST TABLESPACES
           $PSize = "N/A";
           if ( $restPending ne '' ) { $DefStorage = "$restPending - $DefStorage"; }
           if ( ($Name =~ /$TSName/) || ($TSName eq "ALL") ) {
-            printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %9s %9s %-6s\n",
+            printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %9s %9s %-12s\n",
                  $TSID,$Name,$Type,$Contents,$TPages,$UPages,$FPages,$HWM,' ',$PSize,$restPending,$DefStorage,"$State - $DefStorage";
           }
         }
@@ -947,7 +1039,7 @@ else { # either MON_GET_TABLESPACE or LIST TABLESPACES
         $PSize = "N/A";
         if ( $restPending ne '' ) { $DefStorage = "$restPending - $DefStorage"; }
         if ( ($Name =~ /$TSName/) || ($TSName eq "ALL") ) {
-          printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %9s %9s %-6s\n",
+          printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %9s %9s %-12s\n",
                  $TSID,$Name,$Type,$Contents,$TPages,$UPages,$FPages,$HWM,' ',$PSize,'','',"$State - $DefStorage";
         }
       }
@@ -958,7 +1050,7 @@ else { # either MON_GET_TABLESPACE or LIST TABLESPACES
 
       if ( trim($ltsinfo[0]) eq "Offline") {
         if ( ($Name =~ /$TSName/) || ($TSName eq "ALL") ) {
-          printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %9s %9s %-6s\n",
+          printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %9s %9s %-12s\n",
                  $TSID,$Name,$Type,$Contents,'***','Offline','***      ','','','','','',$State; 
         }
       }
@@ -1036,7 +1128,7 @@ else { # either MON_GET_TABLESPACE or LIST TABLESPACES
 
         if ( ($Name =~ /$TSName/) || ($TSName eq "ALL") ) {
           # This will never be executed if "Define Storage" is required as no page size will ever be found
-          printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-6s\n",
+          printf "%-4s %-18s %-4s %-17s %9s %9s %9s %9s %1s %5s %10s %10s %10s %-12s\n",
                  $TSID,$Name,$Type,$Contents,$TPages,$UPages,$FPages,$HWM,$lowerHWM,$PSize,$MbUsed,$MbAlloc,$MbFree,$State; 
         }
       }
