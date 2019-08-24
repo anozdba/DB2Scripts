@@ -1,0 +1,8 @@
+-- Drop the last detached partition 
+
+DROP TABLE %%SCHEMA%%.%%TABLE%%_DETACHED_PART;
+
+-- Move the oldest partition to %%SCHEMA%%.%%TABLE%%_DETACHED_PART
+
+ALTER TABLE %%SCHEMA%%.%%TABLE%% DETACH PART %%PARTNAME%% INTO %%SCHEMA%%.%%TABLE%%_DETACHED_PART;
+

@@ -1,0 +1,10 @@
+-- Add a new partition %%PARTNAME%% to  %%SCHEMA%%.%%TABLE%%
+
+ALTER TABLE %%SCHEMA%%.%%TABLE%%
+  ADD PARTITION %%PARTNAME%%
+                starting from ('%%STARTKEY%%') INCLUSIVE 
+                ENDING AT ('%%ENDKEY%%') INCLUSIVE 
+  IN "%%DATATS%%" 
+  INDEX IN "%%INDEXTS%%"
+  LONG IN "%%LOBTS%%"
+;

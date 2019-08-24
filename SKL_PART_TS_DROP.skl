@@ -1,0 +1,3 @@
+-- drop the tablespaces where the _DETACHED_PART table exists
+
+DROP TABLESPACE %%TABLESPACE%%;
