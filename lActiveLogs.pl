@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # lActiveLogs.pl
 #
-# $Id: lActiveLogs.pl,v 1.11 2019/03/12 23:32:04 db2admin Exp db2admin $
+# $Id: lActiveLogs.pl,v 1.12 2019/08/05 21:21:41 db2admin Exp db2admin $
 #
 # Description:
 # Script to List out Active Log usage
@@ -14,6 +14,9 @@
 #
 # ChangeLog:
 # $Log: lActiveLogs.pl,v $
+# Revision 1.12  2019/08/05 21:21:41  db2admin
+# add in quote to command as Linux complains about it missing
+#
 # Revision 1.11  2019/03/12 23:32:04  db2admin
 # correct mistake in checking for database name
 #
@@ -53,7 +56,7 @@ use strict;
 my $debugLevel = 0;
 my %monthNumber;
 
-my $ID = '$Id: lActiveLogs.pl,v 1.11 2019/03/12 23:32:04 db2admin Exp db2admin $';
+my $ID = '$Id: lActiveLogs.pl,v 1.12 2019/08/05 21:21:41 db2admin Exp db2admin $';
 my @V = split(/ /,$ID);
 my $Version=$V[2];
 my $Changed="$V[3] $V[4]";
@@ -282,7 +285,7 @@ print "Current Log Activity Report\n\n";
 if ( $db2level > 10.1 ) { # DB2 view is avavilable
   if ( $debugLevel > 0 ) { print "Executing: $scriptDir/runSQL.pl -sp \"%%DATABASE%%=$database\" \<$SQLin | db2 -t +wp -x\n";}
 
-  my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$SQLin | db2 -t +wp -x | grep 'DataHere`;
+  my $ans = `$scriptDir/runSQL.pl -sp "%%DATABASE%%=$database" <$SQLin | db2 -t +wp -x | grep 'DataHere'`;
   my ( $t, $MEMBER, $CUR_COMMIT_DISK_LOG_READS, $CURRENT_ACTIVE_LOG, $APPLID_HOLDING_OLDEST_XACT0 ) = split (" ",$ans);
   print "mon_get_transaction_log information:\n\n";
   print "  Member                        : $MEMBER\n";
